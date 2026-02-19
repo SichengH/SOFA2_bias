@@ -42,11 +42,20 @@ WITH co AS (
     WHERE specimen = 'ART.'
 )
 
+-- ==================================================================
+-- [CHANGE-06] pH aggregation changed from MAX to MIN (footnote p).
+-- For RRT criteria, we need the WORST (most acidotic) pH.
+-- OLD: MAX(bg.ph) AS ph
+-- NEW: MIN(bg.ph) AS ph
+-- A patient with pH 7.15 and 7.35 in the same hour now correctly
+-- shows ph=7.15 (triggering pH <= 7.20 check) instead of ph=7.35.
+-- [END CHANGE-06]
+-- ==================================================================
 , bg_ph AS (
 
     SELECT co.hadm_id, co.hr
         -- vitals
-        , MAX(bg.ph) AS ph
+        , MIN(bg.ph) AS ph            -- [CHANGE-06] was: MAX(bg.ph)
     FROM co
     LEFT JOIN `mimic-hr.derived.bg` bg
         ON co.hadm_id = bg.hadm_id
@@ -55,10 +64,18 @@ WITH co AS (
     GROUP BY co.hadm_id, co.hr
 )
 
+-- ==================================================================
+-- [CHANGE-07] Bicarbonate aggregation changed from MAX to MIN (footnote p).
+-- For metabolic acidosis detection (bicarbonate <= 12), we need the
+-- WORST (lowest) bicarbonate value.
+-- OLD: MAX(chem.bicarbonate) AS bicarbonate
+-- NEW: MIN(chem.bicarbonate) AS bicarbonate
+-- [END CHANGE-07]
+-- ==================================================================
 , blood_chem AS (
     SELECT co.hadm_id, co.hr
 
-        , MAX(chem.bicarbonate) AS bicarbonate
+        , MIN(chem.bicarbonate) AS bicarbonate  -- [CHANGE-07] was: MAX(chem.bicarbonate)
         , MAX(chem.potassium) AS potassium
     FROM co
     LEFT JOIN `mimic-hr.derived.chemistry` chem
@@ -94,10 +111,20 @@ WITH co AS (
     GROUP BY co.stay_id, co.hr
 )
 
+-- ==================================================================
+-- [CHANGE-08] Added gcs_motor (footnote d: motor fallback).
+-- When gcs_total is unavailable (e.g. intubated patients), use
+-- gcs_motor with the following mapping:
+--   Motor 6 → score 0, Motor 5 → 1, Motor 4 → 2, Motor 3 → 3, Motor 1-2 → 4
+-- OLD: only MIN(gcs.gcs) AS gcs_min
+-- NEW: also MIN(gcs.gcs_motor) AS gcs_motor_min
+-- [END CHANGE-08]
+-- ==================================================================
 , gcs AS (
     SELECT co.stay_id, co.hr
         -- gcs
         , MIN(gcs.gcs) AS gcs_min
+        , MIN(gcs.gcs_motor) AS gcs_motor_min      -- [CHANGE-08] added motor fallback
     FROM co
     LEFT JOIN `mimic-hr.derived.gcs` gcs
         ON co.stay_id = gcs.stay_id
@@ -179,6 +206,14 @@ WITH co AS (
         , co.hr
         , co.starttime, co.endtime
         , ecmo_hr.ECMO 
+        -- ============================================================
+        -- [CHANGE-09] Added ecmo_resp and ecmo_cv columns from
+        -- updated ECMO_hourly table (see CHANGE-01). These enable
+        -- correct VV/VA scoring in SOFA2 (2).sql.
+        , ecmo_hr.ecmo_resp               -- [CHANGE-09]
+        , ecmo_hr.ecmo_cv                 -- [CHANGE-09]
+        -- [END CHANGE-09]
+        -- ============================================================
         , ms_hr.mechanical_support
         , pf.pao2fio2ratio_novent
         , pf.pao2fio2ratio_vent
@@ -193,6 +228,7 @@ WITH co AS (
         , vaso.rate_phenylephrine
         , vs.meanbp_min
         , gcs.gcs_min
+        , gcs.gcs_motor_min              -- [CHANGE-08] added motor fallback
         -- uo
         , uo.uomlkghr_24hr
         , uo.uomlkghr_12hr
@@ -241,6 +277,14 @@ WITH co AS (
     LEFT JOIN rrt
         ON co.stay_id = rrt.stay_id
             AND co.hr = rrt.hr
+    -- ==================================================================
+    -- [CHANGE-10] Delirium drug dedup is now handled in the source
+    -- table (delirium-drug.sql, CHANGE-05). If using the OLD source
+    -- table without dedup, uncomment the subquery wrapper below.
+    -- OLD: LEFT JOIN `mimic-hr.derived.delirium_drug` dd
+    -- (This could produce duplicate rows from UNION ALL of IV + oral)
+    -- [END CHANGE-10]
+    -- ==================================================================
     LEFT JOIN `mimic-hr.derived.delirium_drug` dd
         ON co.stay_id = dd.stay_id
             AND co.hr = dd.hr
