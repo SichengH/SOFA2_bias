@@ -1,4 +1,5 @@
 -- Sequential Organ Failure Assessment 2 (SOFA-2)
+-- Aligned with Ranzani et al. (2025) SOFA-2 specification
 
 DROP TABLE IF EXISTS `mimic-hr.derived.sofa2`;
 CREATE TABLE `mimic-hr.derived.sofa2` AS
@@ -15,11 +16,13 @@ WITH co AS (
         ON ih.stay_id = ie.stay_id
 )
 
+-- =========================================================================
 -- ECMO: split into respiratory (VV) and cardiovascular (VA) flags
 -- Operationalization:
 --   - ecmo_any: any ECMO presence in hour
 --   - ecmo_resp: value='VV' in hour (respiratory ECMO)
 --   - ecmo_cv:   value='VA' in hour (cardiovascular ECMO)
+
 
 , ecmo AS (
     SELECT
@@ -48,8 +51,10 @@ WITH co AS (
     GROUP BY co.stay_id, co.hr
 )
 
+-- =========================================================================
 -- Mechanical circulatory support (non-ECMO): IABP, Impella, VAD
-    
+
+
 , mechanical_support AS (
     SELECT
         chart.stay_id,
@@ -77,11 +82,13 @@ WITH co AS (
     GROUP BY co.stay_id, co.hr
 )
 
+-- =========================================================================
 -- PaO2/FiO2 ratio with ventilation status
 
 -- We split PaO2/FiO2 into:
 --   - novent: ABG not during an "advanced vent support" interval
 --   - vent:   ABG during invasive/NIV/HFNC interval
+--
 -- SOFA-2: scores 3-4 require advanced vent support, but score 2 can be assigned without advanced vent support.
 
 , pafi AS (
@@ -101,7 +108,10 @@ WITH co AS (
     WHERE specimen = 'ART.'
 )
 
+-- =========================================================================
 -- Labs: pH, bicarbonate, potassium
+-- pH and bicarbonate use MIN (worst = most acidotic) for footnote-p RRT criteria.
+-- Potassium uses MAX (worst = highest) for footnote-p hyperkalemia check.
 
 , bg_ph AS (
     SELECT
@@ -130,6 +140,7 @@ WITH co AS (
     GROUP BY co.hadm_id, co.hr
 )
 
+-- =========================================================================
 -- Vitals: MAP (mean blood pressure)
 
 , vs AS (
@@ -145,6 +156,7 @@ WITH co AS (
     GROUP BY co.stay_id, co.hr
 )
 
+-- =========================================================================
 -- RRT (dialysis flags)
 
 , rrt AS (
@@ -161,78 +173,26 @@ WITH co AS (
     GROUP BY co.stay_id, co.hr
 )
 
--- SEDATION EPISODES (for footnote c: use last GCS before sedation)
---
--- Identifies continuous IV sedation infusions from inputevents.
--- GCS measured during active sedation is invalidated; the most recent
--- valid (non-sedated) GCS is used instead. If no pre-sedation GCS
--- exists and patient is sedated, footnote c says score 0.
---
--- Drug list (conservative — heavy sedatives only, not analgesics):
---   222168 = Propofol
---   225150 = Dexmedetomidine (Precedex)
---   221668 = Midazolam
---   221712 = Ketamine
---   225972 = Pentobarbital
---
--- NOTE: Post-sedation GCS invalidation buffer (e.g., 12h after infusion
--- stops, as in CLIFpy) is NOT implemented. A GCS charted 1 minute after
--- propofol stops would be treated as valid. Consider adding if needed.
-
-, sedation AS (
-    SELECT
-        stay_id,
-        starttime AS sed_start,
-        endtime   AS sed_end
-    FROM `physionet-data.mimiciv_3_1_icu.inputevents`
-    WHERE itemid IN (222168, 225150, 221668, 221712, 225972)
-      AND rate > 0
-)
-
 -- =========================================================================
--- GCS: sedation-aware with motor fallback (footnotes b, c, d)
---
--- 1. Get all GCS measurements with total + motor component
--- 2. Flag measurements that fall within active sedation intervals
--- 3. Aggregate per hour: keep worst VALID (non-sedated) values
--- 4. Also track whether patient was sedated at all in this hour
-
-, gcs_with_sed AS (
-    SELECT
-        g.stay_id,
-        g.charttime,
-        g.gcs     AS gcs_total,
-        g.gcs_motor,
-        -- A GCS is during sedation if ANY sedation interval overlaps
-        MAX(CASE WHEN sed.stay_id IS NOT NULL THEN 1 ELSE 0 END) AS during_sedation
-    FROM `mimic-hr.derived.gcs` g
-    LEFT JOIN sedation sed
-        ON g.stay_id = sed.stay_id
-       AND g.charttime >= sed.sed_start
-       AND g.charttime <= sed.sed_end
-    GROUP BY g.stay_id, g.charttime, g.gcs, g.gcs_motor
-)
-
+-- GCS with motor fallback (footnotes b, d, e)
+    
 , gcs AS (
     SELECT
         co.stay_id,
         co.hr,
-        -- Worst valid (non-sedated) total GCS in this hour
-        MIN(CASE WHEN gcs_with_sed.during_sedation = 0
-                 THEN gcs_with_sed.gcs_total END) AS gcs_min,
-        -- Worst valid (non-sedated) motor component
-        MIN(CASE WHEN gcs_with_sed.during_sedation = 0
-                 THEN gcs_with_sed.gcs_motor END) AS gcs_motor_min,
-        -- Was patient sedated at any point during this hour?
-        MAX(gcs_with_sed.during_sedation) AS is_sedated
+        -- Worst total GCS in this hour
+        MIN(gcs.gcs) AS gcs_min,
+        -- Worst motor component (footnote d fallback)
+        MIN(gcs.gcs_motor) AS gcs_motor_min
     FROM co
-    LEFT JOIN gcs_with_sed
-        ON co.stay_id = gcs_with_sed.stay_id
-       AND co.starttime < gcs_with_sed.charttime
-       AND co.endtime   >= gcs_with_sed.charttime
+    LEFT JOIN `mimic-hr.derived.gcs` gcs
+        ON co.stay_id = gcs.stay_id
+       AND co.starttime < gcs.charttime
+       AND co.endtime   >= gcs.charttime
     GROUP BY co.stay_id, co.hr
 )
 
+-- =========================================================================
 -- Labs: bilirubin, creatinine, platelets
 
 , bili AS (
@@ -274,6 +234,7 @@ WITH co AS (
     GROUP BY co.stay_id, co.hr
 )
 
+-- =========================================================================
 -- PaO2/FiO2 ratio hourly aggregation
 
 , pf AS (
@@ -290,12 +251,20 @@ WITH co AS (
     GROUP BY co.stay_id, co.hr
 )
 
+-- =========================================================================
 -- SpO2/FiO2 ratio (FALLBACK when PaO2/FiO2 unavailable)
+--
 -- Footnote f: Use SpO2/FiO2 ONLY when PaO2/FiO2 unavailable AND SpO2 < 98%.
 -- Footnote f thresholds DIFFER from PaO2/FiO2:
 --   Score 0: >300    Score 1: <=300    Score 2: <=250
 --   Score 3: <=200 + vent support      Score 4: <=120 + vent support or ECMO
-    
+--
+-- Implementation:
+--   1. Get SpO2 measurements from vitalsign (filtered to < 98%)
+--   2. Match nearest FiO2 within +/- 4h from chartevents (itemid 223835)
+--   3. Compute ratio, split by vent status (parallel to pafi CTE)
+--   4. Aggregate hourly (parallel to pf CTE)
+
 , spo2_fio2_raw AS (
     SELECT * FROM (
         SELECT
@@ -354,6 +323,7 @@ WITH co AS (
     GROUP BY co.stay_id, co.hr
 )
 
+-- =========================================================================
 -- Urine output rate (mL/kg/h) over rolling windows (6h, 12h, 24h)
 
 , uo AS (
@@ -371,10 +341,14 @@ WITH co AS (
     GROUP BY co.stay_id, co.hr
 )
 
+-- =========================================================================
 -- Vasopressors/inotropes
 -- Rates are NULL when agent not active.
+--
 -- Footnote j: Only count vasopressors given as continuous IV infusion >= 1 hour.
- 
+-- We filter each derived vasopressor table to rows where the individual
+-- infusion interval (starttime to endtime) spans >= 60 minutes.
+
 , vaso AS (
     SELECT
         co.stay_id,
@@ -425,6 +399,7 @@ WITH co AS (
     GROUP BY co.stay_id, co.hr
 )
 
+-- =========================================================================
 -- Assemble all components into a single per-(stay_id, hr) row
 
 , scorecomp AS (
@@ -463,10 +438,9 @@ WITH co AS (
         -- Vitals
         vs.meanbp_min,
 
-        -- Neurological (sedation-aware, with motor fallback)
+        -- Neurological (with motor fallback)
         gcs.gcs_min,
         gcs.gcs_motor_min,
-        gcs.is_sedated,
 
         -- Urine output windows
         uo.uomlkghr_24hr,
@@ -531,17 +505,19 @@ WITH co AS (
         ON co.hadm_id = blood_chem.hadm_id AND co.hr = blood_chem.hr
 )
 
+-- =========================================================================
 -- Score each organ system per hour
 
 , scorecalc AS (
     SELECT
         scorecomp.*
 
+        -- =================================================================
         -- RESPIRATORY SCORE
         -- Rules:
         --   - Any ECMO (VV or VA) -> respiratory score 4
-        --   - Scores 3-4 require advanced vent support
-        --   - PaO2/FiO2 is primary; SpO2/FiO2 is fallback
+        --   - Scores 3-4 require advanced vent support (handled by _vent field)
+        --   - PaO2/FiO2 is primary; SpO2/FiO2 is fallback (footnote f)
         --   - SpO2/FiO2 uses DIFFERENT thresholds (footnote f):
         --       PaO2/FiO2: 300 / 225 / 150 / 75
         --       SpO2/FiO2: 300 / 250 / 200 / 120
@@ -560,7 +536,7 @@ WITH co AS (
             -- PaO2/FiO2 exists and is > 300 -> score 0 (do NOT fall through to SpO2/FiO2)
             WHEN COALESCE(pao2fio2ratio_vent, pao2fio2ratio_novent) IS NOT NULL THEN 0
 
-            -- SpO2/FiO2 pathway 
+            -- ---- SpO2/FiO2 pathway (fallback, footnote f) ----
             -- Only reached when PaO2/FiO2 is entirely NULL for this hour.
             -- Note: SpO2/FiO2 already filtered to SpO2 < 98% in the sf CTE.
             WHEN spo2fio2ratio_vent   <= 120 THEN 4
@@ -577,6 +553,7 @@ WITH co AS (
             ELSE NULL
         END AS respiration
 
+        -- =================================================================
         -- COAGULATION (Hemostasis) SCORE
         -- Platelet thresholds use <= cutoffs.
         , CASE
@@ -588,6 +565,7 @@ WITH co AS (
             ELSE 0
         END AS coagulation
 
+        -- =================================================================
         -- HEPATIC (Liver) SCORE
 
         , CASE
@@ -599,6 +577,7 @@ WITH co AS (
             ELSE 0
         END AS liver
 
+        -- =================================================================
         -- CARDIOVASCULAR SCORE
         -- Primary SOFA-2 pathway:
         --   - mechanical support -> 4
@@ -685,13 +664,13 @@ WITH co AS (
             ELSE 0
         END AS cardiovascular
 
+        -- =================================================================
         -- NEUROLOGICAL (Brain) SCORE
-        -- For sedated patients, use last GCS before sedation; if unknown, score 0.
         -- Footnote d: if full GCS unavailable, use motor component only.
         -- Footnote e: delirium drug → minimum score 1 (even if GCS=15).
 
         , CASE
-            -- ---- Valid (non-sedated) total GCS available ----
+            -- ---- Total GCS available ----
             WHEN gcs_min >= 3  AND gcs_min <= 5  THEN 4   -- GCS 3-5
             WHEN gcs_min >= 6  AND gcs_min <= 8  THEN 3   -- GCS 6-8
             WHEN gcs_min >= 9  AND gcs_min <= 12 THEN 2   -- GCS 9-12
@@ -700,6 +679,12 @@ WITH co AS (
             WHEN gcs_min = 15 THEN 0
 
             -- ---- Total GCS unavailable: motor fallback (footnote d) ----
+            -- Motor mapping from protocol footnote b:
+            --   Motor 6 (obeys commands)       → score 0
+            --   Motor 5 (localizing to pain)   → score 1
+            --   Motor 4 (withdrawal to pain)   → score 2
+            --   Motor 3 (flexion to pain)      → score 3
+            --   Motor 1-2 (extension/none)     → score 4
             WHEN gcs_min IS NULL AND gcs_motor_min IS NOT NULL THEN
                 CASE
                     WHEN gcs_motor_min <= 2 THEN 4
@@ -711,18 +696,16 @@ WITH co AS (
                     ELSE NULL
                 END
 
-            -- ---- No valid GCS at all: delirium drugs still force score 1 ----
+            -- ---- No GCS at all: delirium drugs still force score 1 ----
             WHEN gcs_min IS NULL AND COALESCE(delirium_drug_rate, 0) > 0 THEN 1
 
-            -- ---- Sedated, no valid GCS → score 0 (footnote c) ----
-            WHEN gcs_min IS NULL AND COALESCE(is_sedated, 0) = 1 THEN 0
-
-            -- ---- No GCS data, not sedated → NULL ----
+            -- ---- No GCS data → NULL ----
             WHEN gcs_min IS NULL THEN NULL
 
             ELSE 0
         END AS cns
 
+        -- =================================================================
         -- RENAL (Kidney) SCORE
         -- Hierarchy:
         --   4: receiving RRT (dialysis_present=1)
@@ -738,6 +721,14 @@ WITH co AS (
             WHEN dialysis_present = 1 THEN 4
 
             -- ---- Score 4: fulfills criteria for RRT (footnote p) ----
+            -- For patients NOT on RRT but who meet indications.
+            -- Protocol specifies two versions to test separately:
+            --   Version A (liberal):  Cr >1.2 OR oliguria
+            --   Version B (strict):   Cr >3.5 OR oliguria
+            -- BOTH require: K+ >=6.0 OR (pH <=7.20 AND bicarb <=12)
+            --
+            -- Currently using Version B (Cr >3.5). To test Version A,
+            -- change the creatinine threshold below from 3.50 to 1.20.
             WHEN (creatinine_max > 3.50 OR uomlkghr_6hr < 0.3)
              AND (
                     potassium >= 6.0
@@ -746,6 +737,7 @@ WITH co AS (
             THEN 4
 
             -- ---- Score 3: creatinine >3.50 ----
+            -- No upper bound: in SOFA-2, score 4 is RRT-based, not creatinine-based
             WHEN creatinine_max > 3.50 THEN 3
 
             -- ---- Score 3: urine output <0.3 mL/kg/h over 24h ----
@@ -780,7 +772,8 @@ WITH co AS (
 
 -- =========================================================================
 -- 24-hour rolling maximum per organ system + total SOFA-2
--- SOFA-2 final score: sum of the maximum points of each organ system within a rolling 24-hour window.
+-- SOFA-2 final score: sum of the maximum points of each organ system within
+-- a rolling 24-hour window.
 
 , score_final AS (
     SELECT
@@ -813,3 +806,4 @@ WITH co AS (
 SELECT *
 FROM score_final
 WHERE hr >= 0;
+
