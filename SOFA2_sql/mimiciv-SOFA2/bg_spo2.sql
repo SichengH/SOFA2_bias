@@ -218,8 +218,16 @@ SELECT
             THEN 100 * po2 / fio2_chartevents
         ELSE NULL
     END AS pao2fio2ratio
+    -- ==================================================================
+    -- [CHANGE-03] SpO2/FiO2 ratio: added SpO2 < 98% guard (footnote f).
+    -- Per SOFA-2, SpO2/FiO2 should only be used when SpO2 < 98%.
+    -- NEW: added AND spo2 < 98 guard to each branch
+    --[END CHANGE-03]
+    -- ==================================================================
     , CASE
         WHEN spo2 IS NULL
+            THEN NULL
+        WHEN spo2 >= 98  -- [CHANGE-03] footnote f: only use S/F when SpO2 < 98%
             THEN NULL
         WHEN fio2 IS NOT NULL
             -- multiply by 100 because fio2 is in a % but should be a fraction
