@@ -20,10 +20,19 @@ WITH co AS (
   where d.label like '%ECMO%' or d.category = 'ECMO'
 )
 , ecmo_hr AS (
---update information about ECMO
     SELECT co.stay_id, co.hr
         -- vitals
         , CASE WHEN MAX(ecmo.value) is not null then 1 else 0 end as ECMO
+        -- ============================================================
+        -- [CHANGE-01] Added VV/VA ECMO split columns (footnote i).
+        -- VV-ECMO → respiratory score 4 only.
+        -- VA-ECMO → respiratory 4 AND cardiovascular 4.
+        -- Without this split, VV-ECMO patients incorrectly get CV score 4.
+        -- The value 'VV' or 'VA' comes from Circuit Configuration (ECMO) rows.
+        , MAX(CASE WHEN ecmo.value = 'VV' THEN 1 ELSE 0 END) AS ecmo_resp
+        , MAX(CASE WHEN ecmo.value = 'VA' THEN 1 ELSE 0 END) AS ecmo_cv
+        -- [END CHANGE-01]
+        -- ============================================================
     FROM co
     LEFT JOIN ecmo
         ON co.stay_id = ecmo.stay_id
