@@ -16,11 +16,13 @@ WITH co AS (
         ON ih.stay_id = ie.stay_id
 )
 
+-- =========================================================================
 -- ECMO: split into respiratory (VV) and cardiovascular (VA) flags
 -- Operationalization:
 --   - ecmo_any: any ECMO presence in hour
 --   - ecmo_resp: value='VV' in hour (respiratory ECMO)
 --   - ecmo_cv:   value='VA' in hour (cardiovascular ECMO)
+
 
 , ecmo AS (
     SELECT
@@ -49,7 +51,9 @@ WITH co AS (
     GROUP BY co.stay_id, co.hr
 )
 
+-- =========================================================================
 -- Mechanical circulatory support (non-ECMO): IABP, Impella, VAD
+
 
 , mechanical_support AS (
     SELECT
@@ -78,7 +82,9 @@ WITH co AS (
     GROUP BY co.stay_id, co.hr
 )
 
+-- =========================================================================
 -- PaO2/FiO2 ratio with ventilation status
+
 -- We split PaO2/FiO2 into:
 --   - novent: ABG not during an "advanced vent support" interval
 --   - vent:   ABG during invasive/NIV/HFNC interval
@@ -102,6 +108,7 @@ WITH co AS (
     WHERE specimen = 'ART.'
 )
 
+-- =========================================================================
 -- Labs: pH, bicarbonate, potassium
 -- Retained from original for completeness and potential future use.
 
@@ -132,6 +139,7 @@ WITH co AS (
     GROUP BY co.hadm_id, co.hr
 )
 
+-- =========================================================================
 -- Vitals: MAP (mean blood pressure)
 
 , vs AS (
@@ -147,6 +155,7 @@ WITH co AS (
     GROUP BY co.stay_id, co.hr
 )
 
+-- =========================================================================
 -- RRT (dialysis flags)
 
 , rrt AS (
@@ -163,6 +172,7 @@ WITH co AS (
     GROUP BY co.stay_id, co.hr
 )
 
+-- =========================================================================
 -- GCS
 
 , gcs AS (
@@ -178,6 +188,7 @@ WITH co AS (
     GROUP BY co.stay_id, co.hr
 )
 
+-- =========================================================================
 -- Labs: bilirubin, creatinine, platelets
 
 , bili AS (
@@ -219,6 +230,7 @@ WITH co AS (
     GROUP BY co.stay_id, co.hr
 )
 
+-- =========================================================================
 -- PaO2/FiO2 ratio hourly aggregation
 
 , pf AS (
@@ -235,6 +247,7 @@ WITH co AS (
     GROUP BY co.stay_id, co.hr
 )
 
+-- =========================================================================
 -- Urine output rate (mL/kg/h) over rolling windows (6h, 12h, 24h)
 
 , uo AS (
@@ -252,6 +265,7 @@ WITH co AS (
     GROUP BY co.stay_id, co.hr
 )
 
+-- =========================================================================
 -- Vasopressors/inotropes
 -- Rates are NULL when agent not active.
 
@@ -298,6 +312,7 @@ WITH co AS (
     GROUP BY co.stay_id, co.hr
 )
 
+-- =========================================================================
 -- Assemble all components into a single per-(stay_id, hr) row
 
 , scorecomp AS (
@@ -396,12 +411,14 @@ WITH co AS (
         ON co.hadm_id = blood_chem.hadm_id AND co.hr = blood_chem.hr
 )
 
+-- =========================================================================
 -- Score each organ system per hour
 
 , scorecalc AS (
     SELECT
         scorecomp.*
 
+        -- =================================================================
         -- RESPIRATORY SCORE
         -- Rules:
         --   - Any ECMO (VV or VA) -> respiratory score 4
@@ -419,6 +436,7 @@ WITH co AS (
             ELSE 0
         END AS respiration
 
+        -- =================================================================
         -- COAGULATION (Hemostasis) SCORE
         -- Platelet thresholds use <= cutoffs.
         , CASE
@@ -430,6 +448,7 @@ WITH co AS (
             ELSE 0
         END AS coagulation
 
+        -- =================================================================
         -- HEPATIC (Liver) SCORE
 
         , CASE
@@ -441,6 +460,7 @@ WITH co AS (
             ELSE 0
         END AS liver
 
+        -- =================================================================
         -- CARDIOVASCULAR SCORE
         -- Primary SOFA-2 pathway:
         --   - mechanical support -> 4
@@ -527,6 +547,7 @@ WITH co AS (
             ELSE 0
         END AS cardiovascular
 
+        -- =================================================================
         -- NEUROLOGICAL (Brain) SCORE
         -- Delirium-drug treatment forces minimum score 1 when GCS=15
 
@@ -536,10 +557,13 @@ WITH co AS (
             WHEN gcs_min >= 9  AND gcs_min <= 12 THEN 2   -- GCS 9-12
             WHEN gcs_min >= 13 AND gcs_min <= 14 THEN 1   -- GCS 13-14
             WHEN gcs_min = 15 AND COALESCE(delirium_drug_rate, 0) > 0 THEN 1
+            -- If GCS is missing but delirium drugs are active, score 1
+            WHEN gcs_min IS NULL AND COALESCE(delirium_drug_rate, 0) > 0 THEN 1
             WHEN gcs_min IS NULL THEN NULL
             ELSE 0
         END AS cns
 
+        -- =================================================================
         -- RENAL (Kidney) SCORE
         -- Hierarchy:
         --   4: receiving RRT (dialysis_present=1)
@@ -566,8 +590,8 @@ WITH co AS (
             -- ---- Score 2: creatinine >2.0 and <=3.50 ----
             WHEN (creatinine_max > 2.0 AND creatinine_max <= 3.50) THEN 2
 
-            -- ---- Score 2: urine output <0.5 mL/kg/h over 12h ----
-            WHEN uomlkghr_12hr < 0.5 THEN 2
+            -- ---- Score 2: urine output <0.3 mL/kg/h over >=12h ----
+            WHEN uomlkghr_12hr < 0.3 THEN 2
 
             -- ---- Score 1: creatinine >1.20 and <=2.0 ----
             WHEN (creatinine_max > 1.20 AND creatinine_max <= 2.0) THEN 1
@@ -587,6 +611,7 @@ WITH co AS (
     FROM scorecomp
 )
 
+-- =========================================================================
 -- 24-hour rolling maximum per organ system + total SOFA-2
 -- SOFA-2 final score: sum of the maximum points of each organ system within
 -- a rolling 24-hour window.
@@ -623,9 +648,8 @@ SELECT *
 FROM score_final
 WHERE hr >= 0;
 
-
-
--- NOTE: SpO2/FiO2 fallback NOT IMPLEMENTED
+-- =============================================================================
+-- LIMITATION / NOTE: SpO2/FiO2 fallback NOT IMPLEMENTED
 -- SOFA-2 specifies using SpO2/FiO2 when PaO2/FiO2 is unavailable AND SpO2 < 98%.
 -- Need to:
 --   1) require SpO2 < 98% for the substitution,
