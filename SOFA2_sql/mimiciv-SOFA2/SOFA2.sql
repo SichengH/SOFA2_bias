@@ -1,4 +1,4 @@
--- Title: Sequential Organ Failure Assessment2 (SOFA2)
+-- Title: Sequential Organ Failure Assessment2(SOFA2)
 
 DROP TABLE IF EXISTS `mimic-hr.derived.sofa2`;
 CREATE TABLE `mimic-hr.derived.sofa2` AS 
@@ -13,7 +13,7 @@ WITH scorecalc AS (
         -- ==============================================================
         -- RESPIRATORY SCORE
         -- ==============================================================
-        -- [CHANGE-11] Rewrite of respiratory scoring.
+        -- [CHANGE-11] Complete rewrite of respiratory scoring.
         -- THREE issues fixed:
         --   (a) Thresholds changed from < to <= (protocol specifies <=)
         --   (b) P/F and S/F now have SEPARATE cascades with DIFFERENT
@@ -97,7 +97,8 @@ WITH scorecalc AS (
 
         -- ==============================================================
         -- CARDIOVASCULAR SCORE
-        -- [CHANGE-12] Adjustment of cardiovascular scoring.
+        -- ==============================================================
+        -- [CHANGE-12] rewrite of cardiovascular scoring.
         -- SIX issues fixed:
         --   (a) Added mechanical_support → score 4 (footnote n).
         --       The mechanical_support_hourly table was joined but
@@ -195,7 +196,18 @@ WITH scorecalc AS (
                  )
             THEN 2
 
-            -- Score 1: MAP < 70, no vasopressor/inotrope
+            -- ===========================================================
+            -- [CHANGE-15] MAP-only scoring tiers (footnote m).
+            -- When vasoactive drugs are not available or precluded,
+            -- use MAP alone with granular cutoffs:
+            --   MAP >= 70 → 0, 60-69 → 1, 50-59 → 2, 40-49 → 3, <40 → 4
+            -- OLD: WHEN meanbp_min < 70 THEN 1
+            -- NEW: full 5-tier MAP scoring below
+            -- [END CHANGE-15]
+            -- ===========================================================
+            WHEN meanbp_min < 40 THEN 4
+            WHEN meanbp_min < 50 THEN 3
+            WHEN meanbp_min < 60 THEN 2
             WHEN meanbp_min < 70 THEN 1
 
             -- NULL handling: if ALL CV inputs are missing
@@ -277,7 +289,7 @@ WITH scorecalc AS (
         -- ==============================================================
         -- RENAL (Kidney) SCORE
         -- ==============================================================
-        -- [CHANGE-14] Two small additions to renal scoring:
+        -- [CHANGE-14] Three additions to renal scoring:
         --   (a) Added footnote p: RRT criteria fallback. Patients who
         --       meet criteria for RRT (creatinine >3.50 AND
         --       potassium >= 6.0 OR metabolic acidosis) score renal 4
