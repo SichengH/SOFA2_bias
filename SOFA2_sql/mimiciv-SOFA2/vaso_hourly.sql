@@ -1,4 +1,3 @@
-
 DROP TABLE IF EXISTS `mimic-hr.derived.vaso_hourly`;
 CREATE TABLE `mimic-hr.derived.vaso_hourly` AS 
 
@@ -12,6 +11,18 @@ WITH co AS (
     INNER JOIN `physionet-data.mimiciv_3_1_icu.icustays` ie
         ON ih.stay_id = ie.stay_id
 )
+
+-- ================================================================
+-- [CHANGE-02] Added >= 60 minute duration filter to each vasopressor
+-- JOIN (footnote j). Only count vasopressors given as continuous IV
+-- infusion >= 1 hour. This excludes short boluses and transient pushes.
+--
+-- I think this makes more sense as a way to do it but there are of course limitations including capturing rate changes
+-- Let me know what you think!
+-- OLD: no duration filter on any JOIN
+-- NEW: AND DATETIME_DIFF(X.endtime, X.starttime, MINUTE) >= 60
+-- [END CHANGE-02]
+-- ================================================================
 
 , vaso AS (
     SELECT
@@ -29,33 +40,40 @@ WITH co AS (
         ON co.stay_id = epi.stay_id
             AND co.endtime > epi.starttime
             AND co.endtime <= epi.endtime
+            AND DATETIME_DIFF(epi.endtime, epi.starttime, MINUTE) >= 60  -- [CHANGE-02]
     LEFT JOIN `mimic-hr.derived.norepinephrine` nor
         ON co.stay_id = nor.stay_id
             AND co.endtime > nor.starttime
             AND co.endtime <= nor.endtime
+            AND DATETIME_DIFF(nor.endtime, nor.starttime, MINUTE) >= 60  -- [CHANGE-02]
     LEFT JOIN `mimic-hr.derived.dopamine` dop
         ON co.stay_id = dop.stay_id
             AND co.endtime > dop.starttime
             AND co.endtime <= dop.endtime
+            AND DATETIME_DIFF(dop.endtime, dop.starttime, MINUTE) >= 60  -- [CHANGE-02]
     LEFT JOIN `mimic-hr.derived.dobutamine` dob
         ON co.stay_id = dob.stay_id
             AND co.endtime > dob.starttime
             AND co.endtime <= dob.endtime
+            AND DATETIME_DIFF(dob.endtime, dob.starttime, MINUTE) >= 60  -- [CHANGE-02]
 
     LEFT JOIN `mimic-hr.derived.milrinone` mil
         ON co.stay_id = mil.stay_id
             AND co.endtime > mil.starttime
             AND co.endtime <= mil.endtime
+            AND DATETIME_DIFF(mil.endtime, mil.starttime, MINUTE) >= 60  -- [CHANGE-02]
 
     LEFT JOIN `mimic-hr.derived.vasopressin` vas
         ON co.stay_id = vas.stay_id
             AND co.endtime > vas.starttime
             AND co.endtime <= vas.endtime
+            AND DATETIME_DIFF(vas.endtime, vas.starttime, MINUTE) >= 60  -- [CHANGE-02]
 
     LEFT JOIN `mimic-hr.derived.phenylephrine` phe
         ON co.stay_id = phe.stay_id
             AND co.endtime > phe.starttime
             AND co.endtime <= phe.endtime
+            AND DATETIME_DIFF(phe.endtime, phe.starttime, MINUTE) >= 60  -- [CHANGE-02]
     WHERE epi.stay_id IS NOT NULL
         OR nor.stay_id IS NOT NULL
         OR dop.stay_id IS NOT NULL
