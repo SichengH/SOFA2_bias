@@ -1,10 +1,13 @@
+-- Mechanical circulatory support hourly flag for SOFA-2
+-- Detects IABP, Impella, VAD, and VA-ECMO from chartevents labels
+-- Any presence → mechanical_support = 1 → cardiovascular score 4 (footnote n)
+
 DROP TABLE IF EXISTS `mimic-hr.derived.mechanical_support_hourly`;
 CREATE TABLE `mimic-hr.derived.mechanical_support_hourly` AS 
 
 WITH co AS (
     SELECT ih.stay_id, ie.hadm_id
         , hr
-        -- start/endtime can be used to filter to values within this hour
         , DATETIME_SUB(ih.endtime, INTERVAL '1' HOUR) AS starttime
         , ih.endtime
     FROM `mimic-hr.derived.icustay_hourly` ih
@@ -12,22 +15,21 @@ WITH co AS (
         ON ih.stay_id = ie.stay_id
 )
 
-,mechanical_support AS (
-  select *
-  from `physionet-data.mimiciv_3_1_icu.chartevents` chart 
-  left join `physionet-data.mimiciv_3_1_icu.d_items` d
-  on chart.itemid = d.itemid
-  WHERE LOWER(label) LIKE '%balloon%'
-   OR LOWER(label) LIKE '%iabp%'
-   OR LOWER(label) LIKE '%impella%'
-   OR LOWER(label) LIKE '%vad%'
-   OR (label = 'Circuit Configuration (ECMO)' AND value = 'VA')
+, mechanical_support AS (
+    SELECT *
+    FROM `physionet-data.mimiciv_3_1_icu.chartevents` chart 
+    LEFT JOIN `physionet-data.mimiciv_3_1_icu.d_items` d
+        ON chart.itemid = d.itemid
+    WHERE LOWER(label) LIKE '%balloon%'
+       OR LOWER(label) LIKE '%iabp%'
+       OR LOWER(label) LIKE '%impella%'
+       OR LOWER(label) LIKE '%vad%'
+       OR (label = 'Circuit Configuration (ECMO)' AND value = 'VA')
 )
+
 , mechanical_support_hour AS (
---update information about mechanical support
     SELECT co.stay_id, co.hr
-        -- vitals
-        , CASE WHEN MAX(mechanical_support.value) is not null then 1 else 0 end as mechanical_support
+        , CASE WHEN MAX(mechanical_support.value) IS NOT NULL THEN 1 ELSE 0 END AS mechanical_support
     FROM co
     LEFT JOIN mechanical_support
         ON co.stay_id = mechanical_support.stay_id
@@ -36,4 +38,4 @@ WITH co AS (
     GROUP BY co.stay_id, co.hr
 )
 
-select * from mechanical_support_hour
+SELECT * FROM mechanical_support_hour
