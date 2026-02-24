@@ -25,11 +25,11 @@ library(writexl)
 
 setwd("/Users/sichenghao/Documents/GitHub 2/SOFA_AI/")
 
-projectid = "mort-prediction-icu"#replace with your own project id
+projectid = "mimic-hr"#replace with your own project id
 bigrquery::bq_auth()#login with google account associated with physionet account
 
 sql <- "
-SELECT * FROM `mort-prediction-icu.derived.sofa2`
+SELECT * FROM `mimic-hr.derived.sofa2`
 "
 
 bq_data <- bq_project_query(projectid, query = sql)
@@ -62,7 +62,8 @@ mimic_gender = bq_table_download(bq_data) #
 
 
 sql <- "
-select icu.* ,adm.admission_location,adm.discharge_location,hospital_expire_flag,gender,insurance,pt.dod,ROW_NUMBER() OVER (PARTITION BY icu.hadm_id ORDER BY icu.intime DESC) AS row_number
+select icu.* ,adm.admission_location,adm.discharge_location,hospital_expire_flag,gender,insurance,pt.dod,
+ROW_NUMBER() OVER (PARTITION BY icu.hadm_id ORDER BY icu.intime) AS row_number
 from `physionet-data.mimiciv_3_1_icu.icustays` icu
 left join `physionet-data.mimiciv_3_1_hosp.admissions` adm
 on adm.hadm_id = icu.hadm_id
@@ -110,22 +111,32 @@ mimic_first_icu = mimic_icu%>%filter(stay_id%in%first_icu$stay_id)
 sofa2_24h = sofa2_mimic%>%
   filter(hr<=24)
 
-sofa2_24h%>%group_by(stay_id) %>%
-  summarise(
-    across(all_of(cols), ~ sum(is.na(.)), .names = "n_miss_{.col}"),
-    .groups = "drop"
-  )
+sofa2_24h$ECMO[sofa2_24h$ECMO==0] = NA
+sofa2_24h$mechanical_support[sofa2_24h$mechanical_support==0] = NA
+
+sofa2_24h = sofa2_24h%>%filter(stay_id%in%mimic_first_icu$stay_id)
 
 cols <- c("gcs_min"
           , "meanbp_min"
           , "platelet_min"
           ,"bilirubin_max"
           ,"creatinine_max"
-#          ,"uomlkghr_6hr"
-#          ,"uomlkghr_12hr"
-#          ,"uomlkghr_24hr"
-#          ,"pao2fio2ratio_vent"
-#          ,"pao2fio2ratio_novent"
+          ,"uomlkghr_6hr"
+          ,"uomlkghr_12hr"
+          ,"uomlkghr_24hr"
+          ,"pao2fio2ratio_vent"
+          ,"pao2fio2ratio_novent"
+          ,"mechanical_support"
+          ,"dialysis_active" 
+          ,"delirium_drug_rate"
+          ,"ECMO"
+          ,"rate_epinephrine"  
+          ,"rate_norepinephrine"
+          ,"rate_dopamine"
+          ,"rate_dobutamine"
+          ,"rate_milrinone"
+          ,"rate_vasopressin"
+          ,"rate_phenylephrine"
 )
 
 sofa2_24h_missing = sofa2_24h %>%
@@ -140,6 +151,27 @@ sofa2_24h_missing$missing_bilirubin_24h = ifelse(sofa2_24h_missing$n_value_bilir
 sofa2_24h_missing$missing_platelet_24h = ifelse(sofa2_24h_missing$n_value_platelet_min==0,1,0)
 sofa2_24h_missing$missing_MAP_24h = ifelse(sofa2_24h_missing$n_value_meanbp_min==0,1,0)
 sofa2_24h_missing$missing_creatinine = ifelse(sofa2_24h_missing$n_value_creatinine_max==0,1,0)
+
+sofa2_24h_missing$missing_uomlkghr_6hr = ifelse(sofa2_24h_missing$n_value_uomlkghr_6hr==0,1,0)
+sofa2_24h_missing$missing_uomlkghr_12hr = ifelse(sofa2_24h_missing$n_value_uomlkghr_12hr==0,1,0)
+sofa2_24h_missing$missing_uomlkghr_24hr = ifelse(sofa2_24h_missing$n_value_uomlkghr_24hr==0,1,0)
+
+sofa2_24h_missing$missing_pao2fio2ratio_vent = ifelse(sofa2_24h_missing$n_value_pao2fio2ratio_vent==0,1,0)
+sofa2_24h_missing$missing_pao2fio2ratio_novent = ifelse(sofa2_24h_missing$n_value_pao2fio2ratio_novent==0,1,0)
+
+sofa2_24h_missing$missing_mechanical_support = ifelse(sofa2_24h_missing$n_value_mechanical_support==0,1,0)
+sofa2_24h_missing$missing_dialysis_active = ifelse(sofa2_24h_missing$n_value_dialysis_active==0,1,0)
+sofa2_24h_missing$missing_delirium_drug_rate = ifelse(sofa2_24h_missing$n_value_delirium_drug_rate==0,1,0)
+sofa2_24h_missing$missing_ECMO = ifelse(sofa2_24h_missing$n_value_ECMO==0,1,0)
+
+
+sofa2_24h_missing$missing_vasopressor = ifelse(sofa2_24h_missing$n_value_rate_dobutamine==0&
+                                               sofa2_24h_missing$n_value_rate_epinephrine==0&
+                                               sofa2_24h_missing$n_value_rate_norepinephrine==0&
+                                               sofa2_24h_missing$n_value_rate_dopamine==0&
+                                               sofa2_24h_missing$n_value_rate_milrinone==0&
+                                               sofa2_24h_missing$n_value_rate_vasopressin==0&
+                                               sofa2_24h_missing$n_value_rate_phenylephrine==0,1,0)
 
 # 
 # out <- sofa2_24h %>%
@@ -194,24 +226,22 @@ sofa2_24h_missing$missing_creatinine = ifelse(sofa2_24h_missing$n_value_creatini
 
 
 mimic_first_icu$los_less_6h = ifelse(mimic_first_icu$los<=0.25,1,0)
-mimic_first_icu = left_join(mimic_first_icu,sofa2_max24)
+#mimic_first_icu = left_join(mimic_first_icu,sofa2_max24)
 mimic_first_icu = left_join(mimic_first_icu,sofa2_24h_missing)
 
-mimic_first_icu$complete_case_24h = ifelse(mimic_first_icu$missing_GCS_24h==1|
-                                             mimic_first_icu$missing_bilirubin_24h==1|
-                                             mimic_first_icu$missing_platelet_24h==1|
-                                             mimic_first_icu$missing_MAP_24h==1|
-                                             mimic_first_icu$missing_creatinine,0,1)
-mimic_icu = left_join(mimic_icu,mimic_demographic)
+# mimic_first_icu$complete_case_24h = ifelse(mimic_first_icu$missing_GCS_24h==1|
+#                                              mimic_first_icu$missing_bilirubin_24h==1|
+#                                              mimic_first_icu$missing_platelet_24h==1|
+#                                              mimic_first_icu$missing_MAP_24h==1|
+#                                              mimic_first_icu$missing_creatinine,0,1)
+
 fwrite(sofa2_mimic,file = "sofa2_mimic_all.csv")
-fwrite(mimic_icu,file = "mimic_all_icu.csv")
+#fwrite(mimic_icu,file = "mimic_all_icu.csv")
 fwrite(mimic_first_icu,file = "mimic_first_icu.csv")
 
-mimic_icu = fread("mimic_icu.csv")
 
-
-
-mouth_care = fread("mouthcare_interval_frequency.csv")
+#############missing###########
+data6h = mimic_first_icu%>%filter(los>0.25)
 
 
 #### Check ABG data###
@@ -224,3 +254,4 @@ bg = bq_table_download(bq_data) #
 
 abg = bg%>%filter(specimen == 'ART.')%>%filter(po2>0)%>%filter(!is.infinite(po2))%>%filter(po2<300)
 hist(abg$po2)
+
