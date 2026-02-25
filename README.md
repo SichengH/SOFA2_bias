@@ -10,48 +10,16 @@ The SOFA-2 score was recently validated across >3 million ICU admissions from 9 
 
 ```
 ├── SOFA2_sql/
-│   ├── mimiciv-SOFA2/                # SOFA-2 scoring implementation
-│   │   ├── SOFA2.sql                 # SOFA-2 organ scores + 24h rolling max
-│   │   ├── SOFA2_component.sql       # Component assembly (all raw inputs per hour)
-│   │   ├── SOFA.sql                  # Original SOFA score (for comparison)
-│   │   ├── bg_spo2.sql              # Blood gas pivot with SpO2/FiO2 fallback
-│   │   ├── ECMO_hourly.sql          # ECMO flags (VV/VA) per ICU hour
-│   │   ├── ECMO_settings.sql        # ECMO settings pivot (audit only)
-│   │   ├── mechanical_support_hourly.sql  # IABP/Impella/VAD detection
-│   │   ├── vaso_hourly.sql          # 7-agent vasopressor rates (≥60 min filter)
-│   │   └── delirium-drug.sql        # Delirium drug administration (IV + oral)
-│   │
-│   └── mimiciv-derived-public/       # Upstream derived tables (from MIMIC-IV)
-│       ├── Blood-gas.sql             # ABG pivot table
-│       ├── Chemistry.sql             # Chemistry labs
-│       ├── Complete-blood-count.sql  # CBC including platelets
-│       ├── Enzyme.sql                # Liver enzymes / bilirubin
-│       ├── GCS.sql                   # Glasgow Coma Scale
-│       ├── Vitalsigns.sql            # Vital signs (HR, BP, SpO2, temp)
-│       ├── Urine_output.sql          # Urine output events
-│       ├── Urine_output_rate.sql     # UO rate (mL/kg/hr) at 6/12/24h windows
-│       ├── RRT.sql                   # Renal replacement therapy
-│       ├── ventilation.sql           # Ventilation status classification
-│       ├── Ventilator_settings.sql   # Ventilator settings pivot
-│       ├── Oxygen_delivery.sql       # O2 delivery devices
-│       ├── Vasopressors(combined).sql # Individual vasopressor extractions
-│       ├── Vasoactive_agent.sql      # Combined vasoactive agent table
-│       ├── Age.sql                   # Patient age at admission
-│       ├── Height.sql                # Patient height
-│       ├── Weight_duration.sql       # Weight with start/stop times
-│       ├── APS-III.sql               # Acute Physiology Score III
-│       ├── CCI.sql                   # Charlson Comorbidity Index
-│       ├── Antibiotics.sql           # Antibiotic prescriptions
-│       ├── Suspicion_of_infection.sql # Sepsis-3 infection criteria
-│       ├── Sepsis3.sql               # Sepsis-3 onset definition
-│       ├── Blood-differential.sql    # WBC differential
-│       ├── Cardiac-markers.sql       # Troponin, CK-MB, NT-proBNP
-│       ├── Coagulation.sql           # Coagulation labs
-│       ├── Surgical_status.sql       # Surgical vs. non-surgical admission
-│       ├── ICU_hourly.sql            # One row per ICU hour
-│       ├── ICU_daily.sql             # One row per ICU day
-│       ├── ICUstay_detail.sql        # ICU stay details
-│       └── ICUstay_times.sql         # ICU stay time boundaries
+│   └── mimiciv-SOFA2/                # SOFA-2 scoring implementation
+│       ├── SOFA2.sql                 # SOFA-2 organ scores + 24h rolling max
+│       ├── SOFA2_component.sql       # Component assembly (all raw inputs per hour)
+│       ├── SOFA.sql                  # Original SOFA score (for comparison)
+│       ├── bg_spo2.sql               # Blood gas pivot with SpO2/FiO2 fallback
+│       ├── ECMO_hourly.sql           # ECMO flags (VV/VA) per ICU hour
+│       ├── ECMO_settings.sql         # ECMO settings pivot (audit only)
+│       ├── mechanical_support_hourly.sql  # IABP/Impella/VAD detection
+│       ├── vaso_hourly.sql           # 7-agent vasopressor rates (≥60 min filter)
+│       └── delirium-drug.sql         # Delirium drug administration (IV + oral)
 │
 ├── SOFA2_bias_analysis/
 │   ├── Data_Processing.R             # Cohort assembly + missingness flags
