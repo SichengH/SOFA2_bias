@@ -4,13 +4,7 @@ An external validation study evaluating the fairness of the SOFA-2 (Sequential O
 
 ## Overview
 
-The SOFA-2 score was recently validated across >3 million ICU admissions from 9 countries but was not evaluated for performance differences across demographic subgroups. This repository contains the complete analytic pipeline — SQL scoring queries and R analysis scripts — used to assess SOFA-2 discrimination and calibration by age, sex, race/ethnicity, primary language, and insurance status.
-
-**Key findings** (n = 64,220 ICU admissions from MIMIC-IV v3.1):
-- Overall AUROC of 0.776 with excellent calibration
-- Discrimination declined significantly with age (AUROC 0.864 for ages 18–44 vs. 0.723 for ages ≥75; ΔAUROC −0.142)
-- Significantly lower discrimination among non-English speakers (ΔAUROC −0.039)
-- Patients with unknown race/ethnicity (14.3% of cohort) had nearly double the overall mortality rate (15.8% vs. 8.4%)
+The SOFA-2 score was recently validated across >3 million ICU admissions from 9 countries but was not evaluated for performance differences across demographic subgroups. This repository contains the complete analytic pipeline (SQL scoring queries and R analysis scripts) used to assess SOFA-2 discrimination and calibration by age, sex, race/ethnicity, primary language, and insurance status.
 
 ## Repository Structure
 
@@ -61,18 +55,12 @@ The SOFA-2 score was recently validated across >3 million ICU admissions from 9 
 │
 ├── SOFA2_bias_analysis/
 │   ├── Data_Processing.R             # Cohort assembly + missingness flags
-│   └── Downstream_Analysis.R         # Fairness analysis (Tables 1–2, Figures)
-│
-└── README.md
+│   └── Downstream_Analysis.R         # Fairness analysis (Tables, Figures)
 ```
 
 ## Data Requirements
 
 This project uses **MIMIC-IV version 3.1**, a freely accessible electronic health record dataset hosted on [PhysioNet](https://physionet.org/content/mimiciv/3.1/). Access requires:
-
-1. Completion of CITI human-subjects training
-2. A signed data use agreement via PhysioNet
-3. A Google BigQuery project for running SQL queries
 
 ## Pipeline
 
@@ -104,23 +92,10 @@ Run **`Data_Processing.R`** which:
 ### Step 4: Fairness Analysis
 
 Run **`Downstream_Analysis.R`** which:
-- Applies plausible physiologic range filters (eTable 1)
+- Applies plausible physiologic range filters
 - Excludes stays < 6 hours and those missing SOFA-2 or mortality outcome
 - Creates demographic subgroup variables
 - Produces all study outputs (see below)
-
-## SOFA-2 Implementation Details
-
-Key differences from the original SOFA score implemented in this codebase:
-
-| Component | SOFA-2 Modification |
-|---|---|
-| **Respiratory** | Revised P/F thresholds (≤75/150/225/300); SpO2/FiO2 fallback when PaO2 unavailable (SpO2 < 98% only); ventilatory support includes NIV, HFNC, CPAP; any ECMO → score 4 |
-| **Cardiovascular** | 7 vasopressors (adds milrinone, vasopressin, phenylephrine); NE+EPI dose tiers with combination rules; mechanical support (IABP/Impella/VAD/VA-ECMO) → score 4; revised MAP tiers (<40/50/60/70) |
-| **Neurological** | GCS motor fallback for intubated patients; delirium drug administration → minimum score 1 |
-| **Renal** | RRT (any) → score 4; RRT criteria check (Cr > 3.5 + K⁺ ≥ 6 or acidosis); urine output at 6/12/24h windows |
-| **Coagulation** | Revised platelet thresholds (≤50/80/100/150) |
-| **Hepatic** | Bilirubin score 2 threshold raised from ≥2.0 to >3.0 mg/dL |
 
 ## Outputs
 
@@ -137,17 +112,13 @@ Key differences from the original SOFA score implemented in this codebase:
 ## Software
 
 - **SQL**: Google BigQuery (Standard SQL)
-- **R** ≥ 4.5.0 with packages: `data.table`, `tidyverse`, `bigrquery`, `DBI`, `pROC`, `gt`, `ggplot2`, `patchwork`, `writexl`, `comorbidity`, `table1`
+- **R** ≥ 4.5.0 
 
 ## Citation
 
 If you use this code, please cite:
 
-> Ellen J. Evaluation of SOFA-2 Score Performance Across Demographic Subgroups: An External Validation Study Using MIMIC-IV. 2025.
-
-And the SOFA-2 development study:
-
-> Ranzani OT, Singer M, Salluh JIF, et al. Development and Validation of the Sequential Organ Failure Assessment (SOFA)-2 Score. *JAMA*. 2025. doi:10.1001/jama.2025.20516
+...
 
 ## License
 
