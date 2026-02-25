@@ -5,8 +5,8 @@
 # OUTPUTS:
 #   - Table 1: Baseline characteristics
 #   - Table 2: Discrimination (AUROC) and Calibration by subgroup
-#   - Supplementary Table: Organ subscores by subgroup (mean, SD)
-#   - Supplementary Table: Organ subscores by subgroup (median, IQR)
+#   - Supplementary Table 1A: Organ subscores by subgroup (mean, SD)
+#   - Supplementary Table 1B: Organ subscores by subgroup (median, IQR)
 #   - Figure 2A-E: Bar charts of mortality by SOFA score and demographics
 #   - Supplementary calibration plots
 #
@@ -20,8 +20,7 @@
 # DATA HANDLING:
 #   - Values outside plausible physiological ranges are excluded
 #   - Patients missing SOFA-2 total score or ICU mortality outcome are excluded
-# ============================================================
-
+#
 
 # ============================================================
 # SECTION 1: SETUP - Load packages and data
@@ -33,15 +32,9 @@ to_install <- pkgs[!pkgs %in% rownames(installed.packages())]
 if (length(to_install)) install.packages(to_install)
 invisible(lapply(pkgs, require, character.only = TRUE))
 
-# Load data
-# sofa2 <- read.csv(
-#   "/Users/jellen/downloads/mimic_first_icu.csv",
-#   stringsAsFactors = FALSE,
-#   na.strings = c("", "NA", "NaN")
-# )
-
+# [D-04] Filename corrected: Data_Processing.R writes mimic_first_icu.csv
 sofa2 <- read.csv(
-  "/Users/jellen/downloads/mimic_first_hadm_icu.csv",
+  "/Users/jellen/downloads/mimic_first_icu.csv",
   stringsAsFactors = FALSE,
   na.strings = c("", "NA", "NaN")
 )
@@ -186,10 +179,10 @@ wilson_ci <- function(deaths, n, z = 1.96) {
 # Helper: check if value is within range or missing (missing values pass)
 in_range_or_na <- function(x, lo, hi) is.na(x) | (x >= lo & x <= hi)
 
-# Convert impossible zero values to NA, then filter by plausible ranges
-sofa2_t <- sofa2 %>%
+# [D-01] Range filtering now writes back to sofa2 (was dead code writing to sofa2_t)
+# Step 1: Convert impossible zero values to NA
+sofa2 <- sofa2 %>%
   mutate(
-    # Zero is impossible for these variables - convert to NA
     gcs_min = ifelse(!is.na(gcs_min) & gcs_min <= 0, NA, gcs_min),
     meanbp_min = ifelse(!is.na(meanbp_min) & meanbp_min <= 0, NA, meanbp_min),
     platelet_min = ifelse(!is.na(platelet_min) & platelet_min <= 0, NA, platelet_min),
@@ -198,7 +191,7 @@ sofa2_t <- sofa2 %>%
     pao2fio2ratio_novent = ifelse(!is.na(pao2fio2ratio_novent) & pao2fio2ratio_novent <= 0, NA, pao2fio2ratio_novent),
     pao2fio2ratio_vent = ifelse(!is.na(pao2fio2ratio_vent) & pao2fio2ratio_vent <= 0, NA, pao2fio2ratio_vent)
   ) %>%
-  # Exclude rows with out-of-range values
+  # Step 2: Exclude rows with out-of-range values
   filter(
     in_range_or_na(gcs_min, 3, 15),
     in_range_or_na(meanbp_min, 15, 199),
@@ -207,9 +200,10 @@ sofa2_t <- sofa2 %>%
     in_range_or_na(creatinine_max, 0.10, 11.23),
     in_range_or_na(uomlkghr_24hr, 0, 3),
     in_range_or_na(pao2fio2ratio_novent, 45, 500),
-    in_range_or_na(pao2fio2ratio_vent, 45, 500)     
+    in_range_or_na(pao2fio2ratio_vent, 45, 500)
   )
 
+# Step 3: Exclude patients with LOS < 6h
 sofa2 <- sofa2 %>%
   dplyr::filter(los >= 0.25)
 
@@ -308,7 +302,9 @@ table(sofa2$missing_bilirubin_24h) / nrow(sofa2)
 table(sofa2$missing_MAP_24h) / nrow(sofa2)
 table(sofa2$missing_platelet_24h) / nrow(sofa2)
 table(sofa2$missing_creatinine) / nrow(sofa2)
-table(sofa2$complete_case_24h) / nrow(sofa2)
+# [D-02] Changed from complete_case_24h (never created) to complete_sofa2
+#        which is produced by Data_Processing.R [R-07]
+table(sofa2$complete_sofa2) / nrow(sofa2)
 
 missing_summary <- function(x, data) {
   n_missing <- sum(x, na.rm = TRUE)
@@ -331,7 +327,8 @@ missing_table <- data.frame(
     missing_summary(sofa2$missing_creatinine, sofa2),
     missing_summary(sofa2$missing_MAP_24h, sofa2),
     missing_summary(sofa2$missing_platelet_24h, sofa2),
-    missing_summary(sofa2$complete_case_24h, sofa2)
+    # [D-02] complete_sofa2: 1 = all 6 components non-NULL in at least 1 hour
+    missing_summary(sofa2$complete_sofa2, sofa2)
   ),
   check.names = FALSE
 )
@@ -537,8 +534,75 @@ table2_gt <- table2_df %>%
 
 table2_gt
 
+
 # ============================================================
-# SECTION 9: SUPPLEMENTARY TABLE - Organ Subscores (Median, IQR)
+# SECTION 8: SUPPLEMENTARY TABLE 1A - Organ Subscores (Mean, SD)
+# [D-03] NEW SECTION — was missing from original, causing supp1a_gt /
+#        supp1a_df to be undefined when referenced in Sections 12 & 13.
+# ============================================================
+
+# Helper function for one row of mean/SD values
+summ_row_mean_sd <- function(df, label, digits = 1) {
+  tibble(
+    Subgroup = label,
+    N = nrow(df),
+    Neuro = fmt_mean_sd(df$neuro, digits),
+    Cardio = fmt_mean_sd(df$cardio, digits),
+    Respiratory = fmt_mean_sd(df$resp, digits),
+    Hepatic = fmt_mean_sd(df$hepatic, digits),
+    Renal = fmt_mean_sd(df$renal, digits),
+    Coag = fmt_mean_sd(df$coag, digits),
+    `Mean SOFA-2` = fmt_mean_sd(df$sofa_24hours, digits)
+  )
+}
+
+# Build the table
+supp1a_df <- bind_rows(
+  summ_row_mean_sd(sofa2, "Overall"),
+  
+  tibble(Subgroup = "Sex", N = NA, Neuro = NA, Cardio = NA, Respiratory = NA, Hepatic = NA, Renal = NA, Coag = NA, `Mean SOFA-2` = NA),
+  summ_row_mean_sd(filter(sofa2, sex == "Male"), "    Male"),
+  summ_row_mean_sd(filter(sofa2, sex == "Female"), "    Female"),
+  
+  tibble(Subgroup = "Age", N = NA, Neuro = NA, Cardio = NA, Respiratory = NA, Hepatic = NA, Renal = NA, Coag = NA, `Mean SOFA-2` = NA),
+  summ_row_mean_sd(filter(sofa2, age_group == "18–44"), "    18–44"),
+  summ_row_mean_sd(filter(sofa2, age_group == "45–64"), "    45–64"),
+  summ_row_mean_sd(filter(sofa2, age_group == "65–74"), "    65–74"),
+  summ_row_mean_sd(filter(sofa2, age_group == "≥75"), "    ≥75"),
+  
+  tibble(Subgroup = "Race/Ethnicity", N = NA, Neuro = NA, Cardio = NA, Respiratory = NA, Hepatic = NA, Renal = NA, Coag = NA, `Mean SOFA-2` = NA),
+  summ_row_mean_sd(filter(sofa2, race_group == "White"), "    White"),
+  summ_row_mean_sd(filter(sofa2, race_group == "Black"), "    Black"),
+  summ_row_mean_sd(filter(sofa2, race_group == "Hispanic"), "    Hispanic"),
+  summ_row_mean_sd(filter(sofa2, race_group == "Asian"), "    Asian"),
+  summ_row_mean_sd(filter(sofa2, race_group == "Other"), "    Other"),
+  summ_row_mean_sd(filter(sofa2, race_group == "Unknown"), "    Unknown"),
+  
+  tibble(Subgroup = "Primary Language", N = NA, Neuro = NA, Cardio = NA, Respiratory = NA, Hepatic = NA, Renal = NA, Coag = NA, `Mean SOFA-2` = NA),
+  summ_row_mean_sd(filter(sofa2, language_group == "English"), "    English"),
+  summ_row_mean_sd(filter(sofa2, language_group == "Non-English"), "    Non-English"),
+  summ_row_mean_sd(filter(sofa2, language_group == "Unknown"), "    Unknown"),
+  
+  tibble(Subgroup = "Insurance Status", N = NA, Neuro = NA, Cardio = NA, Respiratory = NA, Hepatic = NA, Renal = NA, Coag = NA, `Mean SOFA-2` = NA),
+  summ_row_mean_sd(filter(sofa2, insurance_group == "Private"), "    Private"),
+  summ_row_mean_sd(filter(sofa2, insurance_group == "Medicare"), "    Medicare"),
+  summ_row_mean_sd(filter(sofa2, insurance_group == "Medicaid"), "    Medicaid"),
+  summ_row_mean_sd(filter(sofa2, insurance_group == "Other"), "    Other")
+)
+
+supp1a_gt <- supp1a_df %>%
+  gt() %>%
+  tab_header(
+    title = "Supplementary Table 1A. SOFA-2 Organ-Specific Subscores by Demographic Subgroup",
+    subtitle = "Values are mean (SD)"
+  ) %>%
+  sub_missing(everything(), missing_text = "")
+
+supp1a_gt
+
+
+# ============================================================
+# SECTION 9: SUPPLEMENTARY TABLE 1B - Organ Subscores (Median, IQR)
 # ============================================================
 
 # Helper function for one row of median/IQR values
