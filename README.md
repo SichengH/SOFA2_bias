@@ -32,11 +32,7 @@ This project uses **MIMIC-IV version 3.1**, a freely accessible electronic healt
 
 ## Pipeline
 
-### Step 1: Build Derived Tables
-
-Run the SQL scripts in `mimiciv-derived-public/` on Google BigQuery to create upstream derived tables (vitals, labs, ventilation status, vasopressors, etc.). These are standard MIMIC-IV derived concepts.
-
-### Step 2: Build SOFA-2 Components
+### Step 1: Build SOFA-2 Components
 
 Run the scripts in `mimiciv-SOFA2/` in the following order:
 
@@ -48,7 +44,7 @@ Run the scripts in `mimiciv-SOFA2/` in the following order:
 6. **`SOFA2_component.sql`** — Assembles all raw inputs into one table per (stay_id, hour)
 7. **`SOFA2.sql`** — Computes organ scores and 24-hour rolling maximums
 
-### Step 3: Extract Cohort
+### Step 2: Extract Cohort
 
 Run **`Data_Processing.R`** which:
 - Downloads SOFA-2 scores, demographics, and ICU stay data from BigQuery
@@ -57,7 +53,7 @@ Run **`Data_Processing.R`** which:
 - Generates variable-level and component-level missingness flags
 - Outputs `mimic_first_icu_final.csv`
 
-### Step 4: Fairness Analysis
+### Step 3: Fairness Analysis
 
 Run **`Downstream_Analysis.R`** which:
 - Applies plausible physiologic range filters
