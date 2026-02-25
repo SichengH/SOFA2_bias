@@ -299,8 +299,10 @@ mimic_first_icu = left_join(mimic_first_icu, sofa2_24h_score_missing) # [R-07] n
 # 9. SAVE OUTPUTS
 ##############################################################################
 
-fwrite(sofa2_mimic, file = "sofa2_mimic_all.csv")
-fwrite(mimic_first_icu, file = "mimic_first_icu.csv")
+#fwrite(sofa2_mimic, file = "sofa2_mimic_all_final.csv")
+
+
+fwrite(mimic_first_icu, file = "mimic_first_icu_final.csv")
 
 ##############################################################################
 # 10. ABG DATA CHECK (exploratory)
