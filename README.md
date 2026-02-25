@@ -1,82 +1,150 @@
 # Evaluation of SOFA-2 Score Performance Across Demographic Subgroups
 
-An external validation study evaluating the fairness of the SOFA-2 (Sequential Organ Failure Assessment 2) score for ICU mortality prediction across demographic subgroups using MIMIC-IV.
+An external validation study assessing potential performance disparities
+of the **Sequential Organ Failure Assessment 2 (SOFA-2)** score for ICU
+mortality prediction using MIMIC-IV v3.1.
 
 ## Overview
 
-The SOFA-2 score was recently validated across >3 million ICU admissions from 9 countries but was not evaluated for performance differences across demographic subgroups. This repository contains the complete analytic pipeline (SQL scoring queries and R analysis scripts) used to assess SOFA-2 discrimination and calibration by age, sex, race/ethnicity, primary language, and insurance status.
+The SOFA-2 score was recently validated across more than 3 million ICU
+admissions internationally. However, subgroup-specific performance
+differences were not reported.
+
+This repository contains the complete analytic pipeline used to
+externally evaluate:
+
+-   **Discrimination** (AUROC)
+-   **Calibration** (intercept and slope)
+
+across demographic subgroups defined by:
+
+-   Age\
+-   Sex\
+-   Race/ethnicity\
+-   Primary language\
+-   Insurance status
+
+The objective of this study is to assess whether SOFA-2 exhibits
+systematic performance differences across demographic groups when
+applied to a large, diverse ICU cohort.
 
 ## Repository Structure
 
-```
-├── SOFA2_sql/
-│   └── mimiciv-SOFA2/                # SOFA-2 scoring implementation
-│       ├── SOFA2.sql                 # SOFA-2 organ scores + 24h rolling max
-│       ├── SOFA2_component.sql       # Component assembly (all raw inputs per hour)
-│       ├── SOFA.sql                  # Original SOFA score (for comparison)
-│       ├── bg_spo2.sql               # Blood gas pivot with SpO2/FiO2 fallback
-│       ├── ECMO_hourly.sql           # ECMO flags (VV/VA) per ICU hour
-│       ├── ECMO_settings.sql         # ECMO settings pivot (audit only)
-│       ├── mechanical_support_hourly.sql  # IABP/Impella/VAD detection
-│       ├── vaso_hourly.sql           # 7-agent vasopressor rates (≥60 min filter)
-│       └── delirium-drug.sql         # Delirium drug administration (IV + oral)
-│
-├── SOFA2_bias_analysis/
-│   ├── Data_Processing.R             # Cohort assembly + missingness flags
-│   └── Downstream_Analysis.R         # Fairness analysis (Tables, Figures)
-```
+    ├── SOFA2_sql/
+    │   └── mimiciv-SOFA2/
+    │       ├── SOFA2.sql
+    │       ├── SOFA2_component.sql
+    │       ├── SOFA.sql
+    │       ├── bg_spo2.sql
+    │       ├── ECMO_hourly.sql
+    │       ├── ECMO_settings.sql
+    │       ├── mechanical_support_hourly.sql
+    │       ├── vaso_hourly.sql
+    │       └── delirium-drug.sql
+    │
+    ├── SOFA2_bias_analysis/
+    │   ├── Data_Processing.R
+    │   └── Downstream_Analysis.R
+
+### Directory Description
+
+#### `SOFA2_sql/mimiciv-SOFA2/`
+
+Implements the full SOFA-2 scoring pipeline in BigQuery (Standard SQL):
+
+-   **bg_spo2.sql** -- Blood gas pivot table with paired SpO₂/FiO₂
+    fallback logic\
+-   **ECMO_hourly.sql** -- Hourly VV- and VA-ECMO flags\
+-   **mechanical_support_hourly.sql** -- Mechanical circulatory support
+    detection (IABP, Impella, VAD)\
+-   **vaso_hourly.sql** -- Hourly vasopressor dosing for 7 agents
+    (≥60-minute filter)\
+-   **delirium-drug.sql** -- IV and oral delirium drug administration\
+-   **SOFA2_component.sql** -- Assembly of all hourly component inputs\
+-   **SOFA2.sql** -- Organ subscore computation and 24-hour rolling
+    maximum\
+-   **SOFA.sql** -- Original SOFA score implementation (for comparison)
+
+#### `SOFA2_bias_analysis/`
+
+Implements cohort construction and fairness evaluation in R:
+
+-   **Data_Processing.R** -- Cohort assembly and missingness flag
+    generation\
+-   **Downstream_Analysis.R** -- Discrimination and calibration analyses
 
 ## Data Requirements
 
-This project uses **MIMIC-IV version 3.1**, a freely accessible electronic health record dataset hosted on [PhysioNet](https://physionet.org/content/mimiciv/3.1/).
+This project uses **MIMIC-IV version 3.1**, hosted on PhysioNet.
 
-## Pipeline
+The dataset must be loaded into **Google BigQuery** prior to running the
+SQL scripts.
 
-### Step 1: Build SOFA-2 Components
 
-Run the scripts in `mimiciv-SOFA2/` in the following order:
+## Analytic Pipeline
 
-1. **`bg_spo2.sql`** — Blood gas pivot with paired SpO2/FiO2 ratios
-2. **`ECMO_hourly.sql`** — ECMO flags (VV-ECMO → respiratory; VA-ECMO → respiratory + cardiovascular)
-3. **`mechanical_support_hourly.sql`** — Mechanical circulatory support detection
-4. **`vaso_hourly.sql`** — Hourly vasopressor rates (7 agents, ≥60 min duration filter)
-5. **`delirium-drug.sql`** — Delirium drug administration (IV + oral)
-6. **`SOFA2_component.sql`** — Assembles all raw inputs into one table per (stay_id, hour)
-7. **`SOFA2.sql`** — Computes organ scores and 24-hour rolling maximums
+### Step 1 --- Build SOFA-2 Components (BigQuery)
 
-### Step 2: Extract Cohort
+Run the SQL scripts in the following order:
 
-Run **`Data_Processing.R`** which:
-- Downloads SOFA-2 scores, demographics, and ICU stay data from BigQuery
-- Identifies first ICU stay per patient
-- Computes 24-hour max SOFA-2 scores
-- Generates variable-level and component-level missingness flags
-- Outputs `mimic_first_icu_final.csv`
+1.  `bg_spo2.sql`\
+2.  `ECMO_hourly.sql`\
+3.  `mechanical_support_hourly.sql`\
+4.  `vaso_hourly.sql`\
+5.  `delirium-drug.sql`\
+6.  `SOFA2_component.sql`\
+7.  `SOFA2.sql`
 
-### Step 3: Fairness Analysis
+This produces hourly organ subscores and 24-hour maximum SOFA-2 scores
+for each ICU stay.
 
-Run **`Downstream_Analysis.R`** which:
-- Applies plausible physiologic range filters
-- Excludes stays < 6 hours and those missing SOFA-2 or mortality outcome
-- Creates demographic subgroup variables
-- Produces all study outputs (see below)
+### Step 2 --- Cohort Construction (R)
+
+Run `Data_Processing.R`, which:
+
+-   Queries SOFA-2 scores, ICU stays, and demographics from BigQuery\
+-   Restricts to the first ICU stay per patient\
+-   Computes first-24-hour maximum SOFA-2 scores\
+-   Generates component-level and variable-level missingness flags\
+-   Outputs: `mimic_first_icu_final.csv`
+
+### Step 3 --- Fairness Analysis (R)
+
+Run `Downstream_Analysis.R`, which:
+
+-   Applies physiologic plausibility filters\
+-   Excludes stays \< 6 hours\
+-   Excludes missing SOFA-2 or mortality outcome\
+-   Constructs subgroup variables\
+-   Computes discrimination and calibration metrics\
+-   Generates all tables and figures below
 
 ## Outputs
 
-| Output | Description |
-|---|---|
-| **Table 1** | Baseline characteristics (age, sex, race, language, insurance, SOFA-2, mortality) |
-| **Table 2** | AUROC, ΔAUROC, calibration intercept/slope by subgroup |
-| **eTable 2A** | Component-level missingness (first 24h) |
-| **eTable 2B** | Variable-level missingness (first 24h) |
-| **eTable 3** | Organ subscores by subgroup (mean/SD and median/IQR) |
-| **Figure 2** | Mortality bar charts by SOFA-2 score stratified by demographics |
-| **eFigures 2–6** | Calibration plots by subgroup |
+The downstream analysis generates:
+
+-   **Table 1:** Baseline characteristics by subgroup\
+-   **Table 2:** AUROC, ΔAUROC, calibration intercept and slope by
+    subgroup\
+-   **eTable 2A:** Component-level missingness (first 24 hours)\
+-   **eTable 2B:** Variable-level missingness (first 24 hours)\
+-   **eTable 3:** Organ subscore distributions by subgroup\
+-   **Figure 2:** Mortality by SOFA-2 score stratified by demographics\
+-   **eFigures 2--6:** Calibration plots by subgroup
+
+## Reproducibility
+
+To run the full pipeline:
+
+1.  Obtain approved access to MIMIC-IV v3.1\
+2.  Load MIMIC-IV into Google BigQuery\
+3.  Update dataset paths in all SQL files\
+4.  Configure Google Cloud authentication for R
 
 ## Software
 
-- **SQL**: Google BigQuery (Standard SQL)
-- **R** ≥ 4.5.0 
+-   **SQL:** Google BigQuery (Standard SQL)\
+-   **R:** ≥ 4.5.0
 
 ## Citation
 
