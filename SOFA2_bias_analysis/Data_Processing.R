@@ -22,23 +22,17 @@
 # [R-05] Added ecmo_resp and ecmo_cv missingness flags for VV/VA tracking.
 #
 # [R-06] Added sofa2_max24: computes true MAX of each 24h rolling score
-#        across hours 0-24 per stay. The old commented-out version took the
-#        last row by hour, which could miss the actual peak. Now joined to
-#        mimic_first_icu.
+#        across hours 0-24 per stay.
 #
-# [R-07] Added score-level (component) missingness for eTable 2A. Checks
-#        whether each computed subscore (respiration, coagulation, etc.) was
-#        NULL for every hour in 0-24h. Also computes complete_sofa2 flag.
-#        This differs from variable-level missingness because a score can
-#        be non-NULL even when some inputs are missing (e.g., CNS = 1 from
-#        delirium drug alone when GCS is NULL).
+# [R-07] Added score-level (component) missingness for eTable 2A.
 #
-# [R-08] Joined sofa2_max24 and sofa2_24h_score_missing to mimic_first_icu
-#        in the cohort assembly step.
+# [R-08] Joined sofa2_max24 and sofa2_24h_score_missing to mimic_first_icu.
 #
-# [R-09] Removed stale commented-out code blocks that were superseded by
-#        the changes above (old sofa2_max24, old per-variable missing flags,
-#        old complete_case_24h).
+# [R-09] Removed stale commented-out code blocks.
+#
+# [R-10] NEW: Added sofa2_range_values — exports BOTH min (_lo) AND max
+#        (_hi) for every raw SOFA-2 input variable across hr 0-24 per stay.
+#        Both directions needed for eTable 1 plausibility filtering.
 
 
 
@@ -139,9 +133,7 @@ mimic_first_icu = mimic_icu%>%filter(stay_id%in%first_icu$stay_id)
 
 ##############################################################################
 # 5. 24H MAX SOFA-2 SCORE
-# [R-06] NEW: computes true MAX of each 24h rolling score across hr 0-24.
-# The old version (commented out in original) took the last row by hour,
-# which could miss the actual peak if the worst score occurred earlier.
+# [R-06] computes true MAX of each 24h rolling score across hr 0-24.
 ##############################################################################
 
 sofa2_max24 = sofa2_mimic %>%
@@ -159,6 +151,82 @@ sofa2_max24 = sofa2_mimic %>%
   )
 
 ##############################################################################
+# 5B. 24H RAW VARIABLE RANGES (MIN AND MAX)
+# [R-10] Exports BOTH min (_lo) AND max (_hi) for every raw SOFA-2 input
+# variable across hours 0-24 per stay. Both directions are needed so
+# Downstream_Analysis.R can check BOTH bounds per eTable 1:
+#   _lo → used to check lower bound (e.g., GCS >= 3)
+#   _hi → used to check upper bound (e.g., GCS <= 15)
+#
+# Also exports vasopressor max rates and binary flags for Table 1 reporting.
+#
+# na.rm=TRUE with all-NA groups → Inf/-Inf, cleaned to NA at the end.
+##############################################################################
+
+sofa2_range_values = sofa2_mimic %>%
+  filter(hr >= 0, hr <= 24) %>%
+  group_by(stay_id) %>%
+  summarise(
+    # ---- Neurological ----
+    gcs_lo                   = min(gcs_min, na.rm = TRUE),
+    gcs_hi                   = max(gcs_min, na.rm = TRUE),
+    gcs_motor_lo             = min(gcs_motor_min, na.rm = TRUE),
+    gcs_motor_hi             = max(gcs_motor_min, na.rm = TRUE),
+
+    # ---- Cardiovascular ----
+    meanbp_lo                = min(meanbp_min, na.rm = TRUE),
+    meanbp_hi                = max(meanbp_min, na.rm = TRUE),
+
+    # ---- Respiratory (ratios — lower = worse) ----
+    pao2fio2ratio_vent_lo    = min(pao2fio2ratio_vent, na.rm = TRUE),
+    pao2fio2ratio_vent_hi    = max(pao2fio2ratio_vent, na.rm = TRUE),
+    pao2fio2ratio_novent_lo  = min(pao2fio2ratio_novent, na.rm = TRUE),
+    pao2fio2ratio_novent_hi  = max(pao2fio2ratio_novent, na.rm = TRUE),
+    spo2fio2ratio_vent_lo    = min(spo2fio2ratio_vent, na.rm = TRUE),
+    spo2fio2ratio_vent_hi    = max(spo2fio2ratio_vent, na.rm = TRUE),
+    spo2fio2ratio_novent_lo  = min(spo2fio2ratio_novent, na.rm = TRUE),
+    spo2fio2ratio_novent_hi  = max(spo2fio2ratio_novent, na.rm = TRUE),
+
+    # ---- Hepatic ----
+    bilirubin_lo             = min(bilirubin_max, na.rm = TRUE),
+    bilirubin_hi             = max(bilirubin_max, na.rm = TRUE),
+
+    # ---- Renal ----
+    creatinine_lo            = min(creatinine_max, na.rm = TRUE),
+    creatinine_hi            = max(creatinine_max, na.rm = TRUE),
+    uomlkghr_6hr_lo          = min(uomlkghr_6hr, na.rm = TRUE),
+    uomlkghr_6hr_hi          = max(uomlkghr_6hr, na.rm = TRUE),
+    uomlkghr_12hr_lo         = min(uomlkghr_12hr, na.rm = TRUE),
+    uomlkghr_12hr_hi         = max(uomlkghr_12hr, na.rm = TRUE),
+    uomlkghr_24hr_lo         = min(uomlkghr_24hr, na.rm = TRUE),
+    uomlkghr_24hr_hi         = max(uomlkghr_24hr, na.rm = TRUE),
+
+    # ---- Coagulation ----
+    platelet_lo              = min(platelet_min, na.rm = TRUE),
+    platelet_hi              = max(platelet_min, na.rm = TRUE),
+
+    # ---- Vasopressors (max rates for Table 1 reporting) ----
+    rate_norepinephrine_max  = max(rate_norepinephrine, na.rm = TRUE),
+    rate_epinephrine_max     = max(rate_epinephrine, na.rm = TRUE),
+    rate_dopamine_max        = max(rate_dopamine, na.rm = TRUE),
+    rate_dobutamine_max      = max(rate_dobutamine, na.rm = TRUE),
+    rate_milrinone_max       = max(rate_milrinone, na.rm = TRUE),
+    rate_vasopressin_max     = max(rate_vasopressin, na.rm = TRUE),
+    rate_phenylephrine_max   = max(rate_phenylephrine, na.rm = TRUE),
+
+    # ---- Binary flags (any presence in 24h) ----
+    delirium_drug_any        = max(delirium_drug_rate, na.rm = TRUE),
+    dialysis_active_any      = max(dialysis_active, na.rm = TRUE),
+    mechanical_support_any   = max(mechanical_support, na.rm = TRUE),
+    ECMO_any                 = max(ECMO, na.rm = TRUE),
+    ecmo_resp_any            = max(ecmo_resp, na.rm = TRUE),
+    ecmo_cv_any              = max(ecmo_cv, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  # Clean up Inf/-Inf from all-NA groups -> set back to NA
+  mutate(across(where(is.numeric), ~ ifelse(is.infinite(.), NA, .)))
+
+##############################################################################
 # 6. VARIABLE-LEVEL MISSINGNESS (first 24h) — feeds eTable 2B
 ##############################################################################
 
@@ -171,10 +239,8 @@ sofa2_24h$mechanical_support[sofa2_24h$mechanical_support==0] = NA
 
 sofa2_24h = sofa2_24h%>%filter(stay_id%in%mimic_first_icu$stay_id)
 
-# [R-02] Added gcs_motor_min, spo2fio2ratio_vent, spo2fio2ratio_novent,
-#        ecmo_resp, ecmo_cv to this list (new SQL output columns)
 cols <- c("gcs_min"
-          ,"gcs_motor_min"            # [R-02] added: motor fallback (footnote d)
+          ,"gcs_motor_min"
           , "meanbp_min"
           , "platelet_min"
           ,"bilirubin_max"
@@ -184,14 +250,14 @@ cols <- c("gcs_min"
           ,"uomlkghr_24hr"
           ,"pao2fio2ratio_vent"
           ,"pao2fio2ratio_novent"
-          ,"spo2fio2ratio_vent"       # [R-02] added: S/F fallback (footnote f)
-          ,"spo2fio2ratio_novent"     # [R-02] added: S/F fallback (footnote f)
+          ,"spo2fio2ratio_vent"
+          ,"spo2fio2ratio_novent"
           ,"mechanical_support"
           ,"dialysis_active"
           ,"delirium_drug_rate"
           ,"ECMO"
-          ,"ecmo_resp"                # [R-02] added: VV-ECMO flag
-          ,"ecmo_cv"                  # [R-02] added: VA-ECMO flag
+          ,"ecmo_resp"
+          ,"ecmo_cv"
           ,"rate_epinephrine"
           ,"rate_norepinephrine"
           ,"rate_dopamine"
@@ -208,9 +274,6 @@ sofa2_24h_missing = sofa2_24h %>%
     .groups = "drop"
   )
 
-# [R-03] GCS: now requires BOTH gcs_min AND gcs_motor_min absent to flag missing.
-# Old: missing_GCS_24h = ifelse(n_value_gcs_min==0, 1, 0)
-# New: patient with only motor component still gets a valid CNS score.
 sofa2_24h_missing$missing_GCS_24h = ifelse(
   sofa2_24h_missing$n_value_gcs_min==0 &
   sofa2_24h_missing$n_value_gcs_motor_min==0, 1, 0)
@@ -227,11 +290,9 @@ sofa2_24h_missing$missing_uomlkghr_24hr = ifelse(sofa2_24h_missing$n_value_uomlk
 sofa2_24h_missing$missing_pao2fio2ratio_vent = ifelse(sofa2_24h_missing$n_value_pao2fio2ratio_vent==0,1,0)
 sofa2_24h_missing$missing_pao2fio2ratio_novent = ifelse(sofa2_24h_missing$n_value_pao2fio2ratio_novent==0,1,0)
 
-# [R-04] S/F missingness (new — not in original)
 sofa2_24h_missing$missing_spo2fio2ratio_vent = ifelse(sofa2_24h_missing$n_value_spo2fio2ratio_vent==0,1,0)
 sofa2_24h_missing$missing_spo2fio2ratio_novent = ifelse(sofa2_24h_missing$n_value_spo2fio2ratio_novent==0,1,0)
 
-# [R-04] Combined respiratory: no P/F or S/F data at all in 24h
 sofa2_24h_missing$missing_respiratory_all = ifelse(
   sofa2_24h_missing$n_value_pao2fio2ratio_vent==0 &
   sofa2_24h_missing$n_value_pao2fio2ratio_novent==0 &
@@ -243,7 +304,6 @@ sofa2_24h_missing$missing_dialysis_active = ifelse(sofa2_24h_missing$n_value_dia
 sofa2_24h_missing$missing_delirium_drug_rate = ifelse(sofa2_24h_missing$n_value_delirium_drug_rate==0,1,0)
 sofa2_24h_missing$missing_ECMO = ifelse(sofa2_24h_missing$n_value_ECMO==0,1,0)
 
-# [R-05] VV/VA ECMO flags (new — not in original)
 sofa2_24h_missing$missing_ecmo_resp = ifelse(sofa2_24h_missing$n_value_ecmo_resp==0,1,0)
 sofa2_24h_missing$missing_ecmo_cv = ifelse(sofa2_24h_missing$n_value_ecmo_cv==0,1,0)
 
@@ -257,11 +317,6 @@ sofa2_24h_missing$missing_vasopressor = ifelse(sofa2_24h_missing$n_value_rate_do
 
 ##############################################################################
 # 7. SCORE-LEVEL (COMPONENT) MISSINGNESS (first 24h) — feeds eTable 2A
-# [R-07] NEW SECTION: checks whether each computed subscore was NULL for
-# every hour in 0-24h. This differs from variable-level missingness because
-# a score can be non-NULL even when some inputs are missing (e.g., CNS = 1
-# from delirium drug alone when GCS is NULL).
-# complete_sofa2 = all 6 component scores non-NULL for at least 1 hour.
 ##############################################################################
 
 sofa2_24h_score_missing = sofa2_24h %>%
@@ -286,21 +341,17 @@ sofa2_24h_score_missing$complete_sofa2 = ifelse(
 
 ##############################################################################
 # 8. ASSEMBLE ANALYTIC COHORT
-# [R-08] Now joins sofa2_max24 and sofa2_24h_score_missing in addition
-#        to sofa2_24h_missing. Original only joined sofa2_24h_missing.
 ##############################################################################
 
 mimic_first_icu$los_less_6h = ifelse(mimic_first_icu$los<=0.25,1,0)
-mimic_first_icu = left_join(mimic_first_icu, sofa2_max24)             # [R-06] new
-mimic_first_icu = left_join(mimic_first_icu, sofa2_24h_missing)
-mimic_first_icu = left_join(mimic_first_icu, sofa2_24h_score_missing) # [R-07] new
+mimic_first_icu = left_join(mimic_first_icu, sofa2_max24)             # score-level 24h max
+mimic_first_icu = left_join(mimic_first_icu, sofa2_range_values)      # raw variable min/max
+mimic_first_icu = left_join(mimic_first_icu, sofa2_24h_missing)       # variable missingness
+mimic_first_icu = left_join(mimic_first_icu, sofa2_24h_score_missing) # component missingness
 
 ##############################################################################
 # 9. SAVE OUTPUTS
 ##############################################################################
-
-#fwrite(sofa2_mimic, file = "sofa2_mimic_all_final.csv")
-
 
 fwrite(mimic_first_icu, file = "mimic_first_icu_final.csv")
 
