@@ -60,7 +60,7 @@ The SOFA-2 score was recently validated across >3 million ICU admissions from 9 
 
 ## Data Requirements
 
-This project uses **MIMIC-IV version 3.1**, a freely accessible electronic health record dataset hosted on [PhysioNet](https://physionet.org/content/mimiciv/3.1/). Access requires:
+This project uses **MIMIC-IV version 3.1**, a freely accessible electronic health record dataset hosted on [PhysioNet](https://physionet.org/content/mimiciv/3.1/).
 
 ## Pipeline
 
