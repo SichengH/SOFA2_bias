@@ -1,39 +1,5 @@
-##############################################################################
 # SOFA-2 External Validation — Data Extraction & Cohort Assembly
 # Upstream SQL: SOFA2.sql (scoring), SOFA2_component.sql (inputs)
-
-
-
-
-# CHANGELOG (vs. original script):
-#
-# [R-02] Added gcs_motor_min, spo2fio2ratio_vent, spo2fio2ratio_novent,
-#        ecmo_resp, ecmo_cv to the missingness column list. These are new
-#        outputs from the updated SOFA-2 SQL and are needed for eTable 2.
-#
-# [R-03] GCS missingness now requires BOTH gcs_min AND gcs_motor_min to be
-#        absent before flagging missing. The SQL uses motor fallback when
-#        total GCS is unavailable (footnote d), so a patient with only
-#        gcs_motor_min still gets a valid CNS score.
-#
-# [R-04] Added individual S/F missingness flags and a combined
-#        missing_respiratory_all flag (no P/F or S/F data in 24h).
-#
-# [R-05] Added ecmo_resp and ecmo_cv missingness flags for VV/VA tracking.
-#
-# [R-06] Added sofa2_max24: computes true MAX of each 24h rolling score
-#        across hours 0-24 per stay.
-#
-# [R-07] Added score-level (component) missingness for eTable 2A.
-#
-# [R-08] Joined sofa2_max24 and sofa2_24h_score_missing to mimic_first_icu.
-#
-# [R-09] Removed stale commented-out code blocks.
-#
-# [R-10] NEW: Added sofa2_range_values — exports BOTH min (_lo) AND max
-#        (_hi) for every raw SOFA-2 input variable across hr 0-24 per stay.
-#        Both directions needed for eTable 1 plausibility filtering.
-
 
 
 # Packages
@@ -59,17 +25,14 @@ setwd("/Users/sichenghao/Documents/GitHub 2/SOFA_AI/")
 projectid = "mimic-hr"
 bigrquery::bq_auth()
 
-##############################################################################
 # 1. DOWNLOAD SOFA-2 SCORES (hourly, all ICU stays)
-##############################################################################
 
 sql <- "SELECT * FROM `mimic-hr.derived.sofa2`"
 bq_data <- bq_project_query(projectid, query = sql)
 sofa2_mimic = bq_table_download(bq_data)
 
-##############################################################################
+
 # 2. DEMOGRAPHICS (admissions + age + gender)
-##############################################################################
 
 sql <- "
 SELECT subject_id, hadm_id, insurance, language, race, marital_status, hospital_expire_flag
@@ -86,9 +49,8 @@ sql <- "SELECT subject_id, gender FROM `physionet-data.mimiciv_3_1_hosp.patients
 bq_data <- bq_project_query(projectid, query = sql)
 mimic_gender = bq_table_download(bq_data)
 
-##############################################################################
+
 # 3. ICU STAYS — identify first ICU stay per patient
-##############################################################################
 
 sql <- "
 select icu.* ,adm.admission_location,adm.discharge_location,hospital_expire_flag,gender,insurance,pt.dod,
@@ -114,9 +76,8 @@ first_icu = first_icu%>%
 mimic_demographic = left_join(mimic_demographic,mimic_age)
 mimic_demographic = left_join(mimic_demographic,mimic_gender)
 
-##############################################################################
+
 # 4. ICU-SPECIFIC MORTALITY (death within 6h of ICU discharge)
-##############################################################################
 
 sql <- "
 SELECT icu.*,adm.deathtime
@@ -131,10 +92,8 @@ mimic_icu = bq_table_download(bq_data)
 mimic_icu = left_join(mimic_icu,mimic_demographic)
 mimic_first_icu = mimic_icu%>%filter(stay_id%in%first_icu$stay_id)
 
-##############################################################################
+
 # 5. 24H MAX SOFA-2 SCORE
-# [R-06] computes true MAX of each 24h rolling score across hr 0-24.
-##############################################################################
 
 sofa2_max24 = sofa2_mimic %>%
   filter(hr >= 0, hr <= 24) %>%
@@ -150,18 +109,8 @@ sofa2_max24 = sofa2_mimic %>%
     .groups = "drop"
   )
 
-##############################################################################
+
 # 5B. 24H RAW VARIABLE RANGES (MIN AND MAX)
-# [R-10] Exports BOTH min (_lo) AND max (_hi) for every raw SOFA-2 input
-# variable across hours 0-24 per stay. Both directions are needed so
-# Downstream_Analysis.R can check BOTH bounds per eTable 1:
-#   _lo → used to check lower bound (e.g., GCS >= 3)
-#   _hi → used to check upper bound (e.g., GCS <= 15)
-#
-# Also exports vasopressor max rates and binary flags for Table 1 reporting.
-#
-# na.rm=TRUE with all-NA groups → Inf/-Inf, cleaned to NA at the end.
-##############################################################################
 
 sofa2_range_values = sofa2_mimic %>%
   filter(hr >= 0, hr <= 24) %>%
@@ -226,9 +175,8 @@ sofa2_range_values = sofa2_mimic %>%
   # Clean up Inf/-Inf from all-NA groups -> set back to NA
   mutate(across(where(is.numeric), ~ ifelse(is.infinite(.), NA, .)))
 
-##############################################################################
-# 6. VARIABLE-LEVEL MISSINGNESS (first 24h) — feeds eTable 2B
-##############################################################################
+
+# 6. VARIABLE-LEVEL MISSINGNESS (first 24h)
 
 sofa2_24h = sofa2_mimic%>%
   filter(hr<=24)
@@ -315,9 +263,8 @@ sofa2_24h_missing$missing_vasopressor = ifelse(sofa2_24h_missing$n_value_rate_do
                                                sofa2_24h_missing$n_value_rate_vasopressin==0&
                                                sofa2_24h_missing$n_value_rate_phenylephrine==0,1,0)
 
-##############################################################################
-# 7. SCORE-LEVEL (COMPONENT) MISSINGNESS (first 24h) — feeds eTable 2A
-##############################################################################
+
+# 7. SCORE-LEVEL (COMPONENT) MISSINGNESS (first 24h)
 
 sofa2_24h_score_missing = sofa2_24h %>%
   group_by(stay_id) %>%
@@ -339,9 +286,8 @@ sofa2_24h_score_missing$complete_sofa2 = ifelse(
   sofa2_24h_score_missing$missing_cns_score==0 &
   sofa2_24h_score_missing$missing_renal_score==0, 1, 0)
 
-##############################################################################
+
 # 8. ASSEMBLE ANALYTIC COHORT
-##############################################################################
 
 mimic_first_icu$los_less_6h = ifelse(mimic_first_icu$los<=0.25,1,0)
 mimic_first_icu = left_join(mimic_first_icu, sofa2_max24)             # score-level 24h max
@@ -349,19 +295,7 @@ mimic_first_icu = left_join(mimic_first_icu, sofa2_range_values)      # raw vari
 mimic_first_icu = left_join(mimic_first_icu, sofa2_24h_missing)       # variable missingness
 mimic_first_icu = left_join(mimic_first_icu, sofa2_24h_score_missing) # component missingness
 
-##############################################################################
+
 # 9. SAVE OUTPUTS
-##############################################################################
 
 fwrite(mimic_first_icu, file = "mimic_first_icu_final.csv")
-
-##############################################################################
-# 10. ABG DATA CHECK (exploratory)
-##############################################################################
-
-sql <- "SELECT * FROM `physionet-data.mimiciv_3_1_derived.bg`"
-bq_data <- bq_project_query(projectid, query = sql)
-bg = bq_table_download(bq_data)
-
-abg = bg%>%filter(specimen == 'ART.')%>%filter(po2>0)%>%filter(!is.infinite(po2))%>%filter(po2<300)
-hist(abg$po2)
