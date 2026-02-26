@@ -39,10 +39,10 @@ WITH co AS (
         ON co.hadm_id = c.hadm_id
             AND co.starttime < c.charttime
             AND co.endtime >= c.charttime
-    WHERE LOWER(c.medication) LIKE 'quetiapine'
-       OR LOWER(c.medication) LIKE 'ziprasidone'
-       OR LOWER(c.medication) LIKE 'olanzapine'
-       OR LOWER(c.medication) LIKE 'zyprexa'
+    WHERE LOWER(c.medication) LIKE '%quetiapine%'
+       OR LOWER(c.medication) LIKE '%ziprasidone%'
+       OR LOWER(c.medication) LIKE '%olanzapine%'
+       OR LOWER(c.medication) LIKE '%zyprexa%'
     GROUP BY co.stay_id, co.hadm_id, co.hr
 )
 
