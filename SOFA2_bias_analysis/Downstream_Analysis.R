@@ -1,6 +1,4 @@
-# ============================================================
 # SOFA-2 FAIRNESS ANALYSIS (MIMIC-IV)
-# ============================================================
 # 
 # OUTPUTS:
 #   - Table 1: Baseline characteristics
@@ -20,11 +18,9 @@
 # DATA HANDLING:
 #   - Values outside plausible physiological ranges are excluded
 #   - Patients missing SOFA-2 total score or ICU mortality outcome are excluded
-#
 
-# ============================================================
+
 # SECTION 1: SETUP - Load packages and data
-# ============================================================
 
 # Install and load required packages
 pkgs <- c("dplyr", "tidyr", "stringr", "purrr", "tibble", "gt", "pROC", "ggplot2")
@@ -32,32 +28,15 @@ to_install <- pkgs[!pkgs %in% rownames(installed.packages())]
 if (length(to_install)) install.packages(to_install)
 invisible(lapply(pkgs, require, character.only = TRUE))
 
-# [D-04] Filename corrected: Data_Processing.R writes mimic_first_icu.csv
+# Loading in Data
 sofa2 <- read.csv(
-  "/Users/jellen/downloads/mimic_first_icu.csv",
+  "/Users/jellen/downloads/mimic_first_icu_final.csv",
   stringsAsFactors = FALSE,
   na.strings = c("", "NA", "NaN")
 )
 
-# Verify required columns exist
-required_cols <- c(
-  "age", "gender", "race", "language", "insurance", "icu_death_flag", "los",
-  "cns_24hours", "cardiovascular_24hours", "respiration_24hours",
-  "liver_24hours", "renal_24hours", "coagulation_24hours",
-  "gcs_min", "meanbp_min",
-  "rate_norepinephrine", "rate_epinephrine", "rate_dopamine", "rate_dobutamine",
-  "rate_milrinone", "rate_vasopressin", "rate_phenylephrine",
-  "pao2fio2ratio_novent", "pao2fio2ratio_vent",
-  "bilirubin_max", "creatinine_max", "uomlkghr_24hr", "platelet_min",
-  "sofa_24hours"
-)
-missing_cols <- setdiff(required_cols, names(sofa2))
-if (length(missing_cols) > 0) stop("Missing required columns: ", paste(missing_cols, collapse = ", "))
 
-
-# ============================================================
 # SECTION 2: HELPER FUNCTIONS
-# ============================================================
 
 # Format count and percentage: "n (x.x%)"
 fmt_n_pct <- function(n, N) {
@@ -158,10 +137,8 @@ wilson_ci <- function(deaths, n, z = 1.96) {
 }
 
 
-# ============================================================
 # SECTION 3: DATA CLEANING - Apply plausible value ranges
-# ============================================================
-# 
+                      
 # Exclude patients with physiologically implausible values
 # Ranges from SOFA-2 validation study (Supplementary Table 1):
 #   - GCS: 3–15
@@ -172,45 +149,72 @@ wilson_ci <- function(deaths, n, z = 1.96) {
 #   - Creatinine: ≥0.10, ≤11.23 mg/dL
 #   - Urine output: ≥0, ≤3 ml/kg/h
 #   - PaO2/FiO2 ratio: ≥45, <500 mmHg
-#   - FiO2: ≥21%, ≤100%
-#   - White blood cell: ≥0, ≤99 x10^3/µL
-#   - Lymphocytes: ≥0, ≤99 x10^3/µL
 
-# Helper: check if value is within range or missing (missing values pass)
+# Helper: value is within [lo, hi] or is missing
 in_range_or_na <- function(x, lo, hi) is.na(x) | (x >= lo & x <= hi)
 
-# [D-01] Range filtering now writes back to sofa2 (was dead code writing to sofa2_t)
+# Helper: strict upper bound for PaO2/FiO2 (eTable 1 says "<500")
+in_range_or_na_strict_hi <- function(x, lo, hi) is.na(x) | (x >= lo & x < hi)
+
 # Step 1: Convert impossible zero values to NA
 sofa2 <- sofa2 %>%
   mutate(
-    gcs_min = ifelse(!is.na(gcs_min) & gcs_min <= 0, NA, gcs_min),
-    meanbp_min = ifelse(!is.na(meanbp_min) & meanbp_min <= 0, NA, meanbp_min),
-    platelet_min = ifelse(!is.na(platelet_min) & platelet_min <= 0, NA, platelet_min),
-    bilirubin_max = ifelse(!is.na(bilirubin_max) & bilirubin_max <= 0, NA, bilirubin_max),
-    creatinine_max = ifelse(!is.na(creatinine_max) & creatinine_max <= 0, NA, creatinine_max),
-    pao2fio2ratio_novent = ifelse(!is.na(pao2fio2ratio_novent) & pao2fio2ratio_novent <= 0, NA, pao2fio2ratio_novent),
-    pao2fio2ratio_vent = ifelse(!is.na(pao2fio2ratio_vent) & pao2fio2ratio_vent <= 0, NA, pao2fio2ratio_vent)
-  ) %>%
-  # Step 2: Exclude rows with out-of-range values
+    gcs_lo       = ifelse(!is.na(gcs_lo)       & gcs_lo       <= 0, NA, gcs_lo),
+    gcs_hi       = ifelse(!is.na(gcs_hi)       & gcs_hi       <= 0, NA, gcs_hi),
+    gcs_motor_lo = ifelse(!is.na(gcs_motor_lo) & gcs_motor_lo <= 0, NA, gcs_motor_lo),
+    gcs_motor_hi = ifelse(!is.na(gcs_motor_hi) & gcs_motor_hi <= 0, NA, gcs_motor_hi),
+    meanbp_lo    = ifelse(!is.na(meanbp_lo)    & meanbp_lo    <= 0, NA, meanbp_lo),
+    platelet_lo  = ifelse(!is.na(platelet_lo)  & platelet_lo  <= 0, NA, platelet_lo),
+    bilirubin_lo = ifelse(!is.na(bilirubin_lo) & bilirubin_lo <= 0, NA, bilirubin_lo),
+    creatinine_lo = ifelse(!is.na(creatinine_lo) & creatinine_lo <= 0, NA, creatinine_lo),
+    pao2fio2ratio_novent_lo = ifelse(!is.na(pao2fio2ratio_novent_lo) & pao2fio2ratio_novent_lo <= 0, NA, pao2fio2ratio_novent_lo),
+    pao2fio2ratio_vent_lo   = ifelse(!is.na(pao2fio2ratio_vent_lo)   & pao2fio2ratio_vent_lo   <= 0, NA, pao2fio2ratio_vent_lo)
+  )
+
+# Step 2: Exclude patients with ANY out-of-range value per eTable 1
+sofa2 <- sofa2 %>%
   filter(
-    in_range_or_na(gcs_min, 3, 15),
-    in_range_or_na(meanbp_min, 15, 199),
-    in_range_or_na(platelet_min, 1, 999),
-    in_range_or_na(bilirubin_max, 0.1, 46.78),
-    in_range_or_na(creatinine_max, 0.10, 11.23),
-    in_range_or_na(uomlkghr_24hr, 0, 3),
-    in_range_or_na(pao2fio2ratio_novent, 45, 500),
-    in_range_or_na(pao2fio2ratio_vent, 45, 500)
+    # Glasgow Coma Scale, 3-15
+    in_range_or_na(gcs_lo, 3, 15),
+    in_range_or_na(gcs_hi, 3, 15),
+
+    # GCS Motor component, 1-6
+    in_range_or_na(gcs_motor_lo, 1, 6),
+    in_range_or_na(gcs_motor_hi, 1, 6),
+
+    # Platelets, >=1 and <=999 x10^3/uL
+    in_range_or_na(platelet_lo, 1, 999),
+    in_range_or_na(platelet_hi, 1, 999),
+
+    # Total Serum Bilirubin, >=0.1 and <=46.78 mg/dL
+    in_range_or_na(bilirubin_lo, 0.1, 46.78),
+    in_range_or_na(bilirubin_hi, 0.1, 46.78),
+
+    # Mean Arterial Pressure, >=15 and <=199 mmHg
+    in_range_or_na(meanbp_lo, 15, 199),
+    in_range_or_na(meanbp_hi, 15, 199),
+
+    # PaO2/FiO2, >=45 and <500 mmHg (strict upper bound)
+    in_range_or_na_strict_hi(pao2fio2ratio_novent_lo, 45, 500),
+    in_range_or_na_strict_hi(pao2fio2ratio_novent_hi, 45, 500),
+    in_range_or_na_strict_hi(pao2fio2ratio_vent_lo, 45, 500),
+    in_range_or_na_strict_hi(pao2fio2ratio_vent_hi, 45, 500),
+
+    # Serum Creatinine, >=0.10 and <=11.23 mg/dL
+    in_range_or_na(creatinine_lo, 0.10, 11.23),
+    in_range_or_na(creatinine_hi, 0.10, 11.23),
+
+    # Urine Output, >=0 and <=3 mL/kg/h
+    in_range_or_na(uomlkghr_24hr_lo, 0, 3),
+    in_range_or_na(uomlkghr_24hr_hi, 0, 3)
   )
 
 # Step 3: Exclude patients with LOS < 6h
 sofa2 <- sofa2 %>%
   dplyr::filter(los >= 0.25)
 
-
-# ============================================================
+                      
 # SECTION 4: CREATE ANALYSIS VARIABLES
-# ============================================================
 
 sofa2 <- sofa2 %>%
   mutate(
@@ -278,23 +282,20 @@ sofa2 <- sofa2 %>%
   )
 
 
-# ============================================================
+
 # SECTION 5: CREATE ANALYTIC COHORT AND MISSING DATA/LOS ANALYSIS
-# ============================================================
-# 
+
 # Exclude patients missing:
 #   - Total SOFA-2 score (sofa_24hours)
 #   - ICU mortality outcome (icu_mort)
+#   Note: no patients missing either variable
 
 sofa2 <- sofa2 %>% filter(!is.na(sofa_24hours), 
-                          !is.na(icu_death_flag)
-                          )
-nrow(sofa2)
+                          !is.na(icu_death_flag))
 
 # Store total sample size
 N_total <- nrow(sofa2)
 cat("Analytic cohort size:", N_total, "patients\n")
-
 
 # Missing Data Table
 table(sofa2$missing_GCS_24h) / nrow(sofa2)
@@ -359,9 +360,8 @@ ggplot(sofa2, aes(x = sofa_24hours)) +
   ) +
   theme_minimal(base_size = 12)
 
-# ============================================================
+
 # SECTION 6: TABLE 1 - Baseline Characteristics
-# ============================================================
 
 table1_df <- bind_rows(
   # Age
@@ -414,9 +414,8 @@ table1_gt <- table1_df %>%
 table1_gt
 
 
-# ============================================================
+
 # SECTION 7: TABLE 2 - Discrimination and Calibration by Subgroup
-# ============================================================
 
 make_table2_df <- function(df, score_col = "sofa_24hours", B = 1000, seed = 1) {
   
@@ -535,11 +534,8 @@ table2_gt <- table2_df %>%
 table2_gt
 
 
-# ============================================================
+
 # SECTION 8: SUPPLEMENTARY TABLE 1A - Organ Subscores (Mean, SD)
-# [D-03] NEW SECTION — was missing from original, causing supp1a_gt /
-#        supp1a_df to be undefined when referenced in Sections 12 & 13.
-# ============================================================
 
 # Helper function for one row of mean/SD values
 summ_row_mean_sd <- function(df, label, digits = 1) {
@@ -601,9 +597,8 @@ supp1a_gt <- supp1a_df %>%
 supp1a_gt
 
 
-# ============================================================
+
 # SECTION 9: SUPPLEMENTARY TABLE 1B - Organ Subscores (Median, IQR)
-# ============================================================
 
 # Helper function for one row of median/IQR values
 summ_row_median_iqr <- function(df, label, digits = 0) {
@@ -665,9 +660,8 @@ supp1b_gt <- supp1b_df %>%
 supp1b_gt
 
 
-# ============================================================
+
 # SECTION 10: FIGURE 2 - Mortality Bar Charts by SOFA Score
-# ============================================================
 
 # ----- Helper: Compute mortality by individual SOFA score -----
 compute_mortality_by_score <- function(df, group_var, levels, score_col = "sofa_24hours") {
@@ -705,26 +699,26 @@ plot_mortality_barchart <- function(mort_data, title, group_var_name, color_pale
     theme(legend.position = "bottom", axis.text.x = element_text(size = 9), panel.grid.minor = element_blank())
 }
 
-# ----- Define subgroup orderings and colors (blue palette, light to dark) -----
-
-# Age: youngest (lightest) to oldest (darkest)
+# ----- Define subgroup orderings -----
+    
+# Age: youngest to oldest 
 age_levels <- c("18–44", "45–64", "65–74", "≥75")
 age_colors <- c("18–44" = "#C6DBEF", "45–64" = "#6BAED6", "65–74" = "#2171B5", "≥75" = "#08306B")
 
-# Sex: Male (dark), Female (light)
+# Sex: Male), Female
 sex_levels <- c("Male", "Female")
 sex_colors <- c("Male" = "#2166AC", "Female" = "#92C5DE")
 
-# Race: White (lightest) to Unknown (darkest)
+# Race: White to Unknown
 race_levels <- c("White", "Asian", "Hispanic", "Black", "Other", "Unknown")
 race_colors <- c("White" = "#C6DBEF", "Asian" = "#9ECAE1", "Hispanic" = "#6BAED6", 
                  "Black" = "#4292C6", "Other" = "#2171B5", "Unknown" = "#084594")
 
-# Language: English (lightest) to Unknown (darkest)
+# Language: English to Unknown 
 language_levels <- c("English", "Non-English", "Unknown")
 language_colors <- c("English" = "#C6DBEF", "Non-English" = "#6BAED6", "Unknown" = "#08519C")
 
-# Insurance: Private (lightest) to Other (darkest)
+# Insurance: Private to Other
 insurance_levels <- c("Private", "Medicare", "Medicaid", "Other")
 insurance_colors <- c("Private" = "#C6DBEF", "Medicare" = "#6BAED6", "Medicaid" = "#2171B5", "Other" = "#08306B")
 
@@ -743,9 +737,7 @@ fig2d_language <- plot_mortality_barchart(mort_lang, "", "Language", language_co
 fig2e_insurance <- plot_mortality_barchart(mort_ins, "", "Insurance", insurance_colors)
 
 
-# ============================================================
 # SECTION 11: SUPPLEMENTARY CALIBRATION PLOTS
-# ============================================================
 
 # ----- Helper: Bin data by predicted risk and calculate observed mortality -----
 calibration_bins <- function(df, group_var, levels, score_col = "sofa_24hours", n_bins = 10, min_n = 20) {
@@ -801,9 +793,7 @@ p_cal_lang <- plot_calibration(cal_lang, "Calibration by Language")
 p_cal_ins <- plot_calibration(cal_ins, "Calibration by Insurance")
 
 
-# ============================================================
 # SECTION 12: DISPLAY ALL OUTPUTS
-# ============================================================
 
 cat("\n========== TABLE 1 ==========\n")
 table1_gt
@@ -832,9 +822,7 @@ print(p_cal_lang)
 print(p_cal_ins)
 
 
-# ============================================================
 # SECTION 13: EXPORT TABLES AS TAB-SEPARATED TEXT
-# ============================================================
 
 df_to_tsv <- function(df) {
   out <- df %>% mutate(across(everything(), ~ ifelse(is.na(.x), "", as.character(.x))))
