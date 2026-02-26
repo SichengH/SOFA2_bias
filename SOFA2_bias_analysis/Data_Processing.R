@@ -178,8 +178,8 @@ sofa2_range_values = sofa2_mimic %>%
 
 # 6. VARIABLE-LEVEL MISSINGNESS (first 24h)
 
-sofa2_24h = sofa2_mimic%>%
-  filter(hr<=24)
+sofa2_24h = sofa2_mimic %>%
+  filter(hr >= 0, hr <= 24)
 
 # Convert treatment-absence (0) to NA for eTable 2 reporting.
 sofa2_24h$ECMO[sofa2_24h$ECMO==0] = NA
