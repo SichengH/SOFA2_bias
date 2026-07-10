@@ -1,0 +1,63 @@
+---
+title: "Untitled"
+author: "Hao, Sicheng"
+date: "2026-07-09"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(data.table)
+
+# File input and output packages.
+library(readxl)
+library(gdata)
+library(writexl)
+
+# Date and clinical analysis packages.
+library(lubridate)
+library(comorbidity)
+library(table1)
+
+# BigQuery and database connection packages.
+library(bigrquery)
+library(DBI)
+library(dbplyr)
+
+# Modeling, reporting, and plot-composition packages.
+library(broom)
+library(patchwork)
+library(mice)
+
+mimic = fread("/Users/sichenghao/Downloads/mimic_first_icu_final.csv")
+```
+
+
+```{r,echo=F}
+diagnosis = fread("/Users/sichenghao/Desktop/Primary_diag_MIMIC_ICU_categorized.csv")
+projectid = "mimic-hr"
+bigrquery::bq_auth()
+
+sql <- "SELECT * FROM `mimic-hr.derived.charlson` "
+bq_data <- bq_project_query(projectid, query = sql)
+cci = bq_table_download(bq_data)
+
+cci = cci%>%select(hadm_id,charlson_comorbidity_index,age_score)
+```
+
+```{r,echo=F}
+mimic = left_join(mimic,cci)
+
+
+diagnosis = diagnosis%>%
+  group_by(hadm_id)%>%
+  slice(1)
+mimic = left_join(mimic,diagnosis)
+
+
+fwrite(mimic,file = "/Users/sichenghao/Downloads/mimic_first_icu_final_edited.csv")
+```
+
